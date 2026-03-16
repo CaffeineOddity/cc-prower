@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__chat-provider__list_chats",
+      "mcp__chat-provider__get_status"
+    ]
+  }
+}

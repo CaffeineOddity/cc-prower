@@ -1,0 +1,27 @@
+# cc-connect-carry 配置示例
+
+# MCP 服务器配置
+mcp:
+  # 传输方式: stdio 或 websocket
+  transport: "stdio"
+  # WebSocket 模式下的端口（仅当 transport=websocket 时使用）
+  # port: 8080
+  # host: "0.0.0.0"
+
+# 项目配置目录
+projects_dir: "./projects"
+
+# 日志配置
+logging:
+  level: "info"
+  # 可选: 日志文件路径
+  # file: "./logs/cc-carry.log"
+
+# Provider 配置
+providers:
+  feishu:
+    enabled: true
+  telegram:
+    enabled: true
+  whatsapp:
+    enabled: false
