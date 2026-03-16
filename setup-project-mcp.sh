@@ -5,6 +5,10 @@
 
 set -e
 
+# CLI 名称和配置文件
+CLI_NAME="cc-power"
+CONFIG_FILES=(".cc-power.yaml" "cc-power.yaml" "config.yaml")
+
 # 颜色定义
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -50,12 +54,12 @@ if [ ! -d "$PROJECT_PATH" ]; then
     exit 1
 fi
 
-# 检查 cc-carry 是否已安装
-if ! command -v cc-carry &> /dev/null; then
-    print_error "cc-carry 未安装"
+# 检查 CLI 是否已安装
+if ! command -v $CLI_NAME &> /dev/null; then
+    print_error "${CLI_NAME} 未安装"
     echo ""
-    echo "请先在 cc-connect-carry 目录运行:"
-    echo "  cd /path/to/cc-connect-carry"
+    echo "请先在 cc-prower 根目录运行:"
+    echo "  cd /path/to/cc-prower"
     echo "  ./setup.sh"
     exit 1
 fi
@@ -69,13 +73,12 @@ echo ""
 PROJECT_NAME=$(basename "$PROJECT_PATH")
 print_info "项目路径: $PROJECT_PATH"
 print_info "项目名称: $PROJECT_NAME"
-print_success "cc-carry 已安装: $(which cc-carry)"
+print_success "${CLI_NAME} 已安装: $(which $CLI_NAME)"
 
 # 进入项目目录
 cd "$PROJECT_PATH"
 
 # 检查是否已有配置
-CONFIG_FILES=(".cc-carry.yaml" "cc-carry.yaml" "config.yaml")
 CONFIG_FILE=""
 
 for file in "${CONFIG_FILES[@]}"; do
@@ -99,7 +102,7 @@ if [ -z "$CONFIG_FILE" ]; then
 
     case $choice in
         1)
-            CONFIG_FILE=".cc-carry.yaml"
+            CONFIG_FILE=".cc-power.yaml"
             print_info "创建飞书配置模板..."
             cat > "$CONFIG_FILE" << 'EOF'
 provider: "feishu"
@@ -119,7 +122,7 @@ EOF
             print_warning "请更新 $CONFIG_FILE 中的凭证信息"
             ;;
         2)
-            CONFIG_FILE="cc-carry.yaml"
+            CONFIG_FILE="cc-power.yaml"
             print_info "创建 Telegram 配置模板..."
             cat > "$CONFIG_FILE" << 'EOF'
 provider: "telegram"
@@ -159,7 +162,7 @@ if claude mcp list 2>&1 | grep -q "chat-provider"; then
         print_info "移除现有配置..."
         claude mcp remove chat-provider -s local > /dev/null 2>&1 || true
         print_info "添加新的 MCP 服务器..."
-        if claude mcp add chat-provider -- cc-carry start > /dev/null 2>&1; then
+        if claude mcp add chat-provider -- $CLI_NAME start > /dev/null 2>&1; then
             print_success "MCP 服务器配置成功"
         else
             print_error "MCP 服务器配置失败"
@@ -167,7 +170,7 @@ if claude mcp list 2>&1 | grep -q "chat-provider"; then
     fi
 else
     print_info "添加 MCP 服务器..."
-    if claude mcp add chat-provider -- cc-carry start > /dev/null 2>&1; then
+    if claude mcp add chat-provider -- $CLI_NAME start > /dev/null 2>&1; then
         print_success "MCP 服务器配置成功"
     else
         print_error "MCP 服务器配置失败"

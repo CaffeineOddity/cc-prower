@@ -84,56 +84,6 @@ export class ConfigManager implements IConfigManager {
   }
 
   /**
-   * 加载所有项目配置
-   */
-  async loadAllProjects(): Promise<Map<string, ProjectConfig>> {
-    if (!this.globalConfig) {
-      throw new Error('Global config not loaded');
-    }
-
-    const projects = new Map<string, ProjectConfig>();
-    const projectsDir = this.globalConfig.projects_dir;
-
-    try {
-      // 检查项目目录是否存在
-      await fs.access(projectsDir);
-    } catch {
-      // 目录不存在，返回空映射
-      return projects;
-    }
-
-    const entries = await fs.readdir(projectsDir, { withFileTypes: true });
-
-    for (const entry of entries) {
-      if (!entry.name.endsWith('.yaml') && !entry.isDirectory()) {
-        continue;
-      }
-
-      let projectId: string;
-
-      if (entry.isDirectory()) {
-        // projects_dir/projectId/config.yaml
-        projectId = entry.name;
-      } else {
-        // projects_dir/projectId.yaml
-        projectId = entry.name.replace('.yaml', '');
-      }
-
-      try {
-        const config = await this.loadProject(projectId);
-        if (config) {
-          projects.set(projectId, config);
-        }
-      } catch (error) {
-        console.error(`Failed to load project ${projectId}:`, error);
-      }
-    }
-
-    this.projectsCache = projects;
-    return projects;
-  }
-
-  /**
    * 监听配置文件变化
    */
   watch(callback: (projectId: string, config: ProjectConfig) => void): void {

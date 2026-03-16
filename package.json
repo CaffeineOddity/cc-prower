@@ -1,49 +1,26 @@
 {
-  "name": "cc-connect-carry",
+  "name": "cc-power-monorepo",
   "version": "1.0.0",
-  "description": "Lightweight bridge between Claude Code and chat platforms via MCP",
-  "type": "module",
-  "main": "dist/index.js",
-  "bin": {
-    "cc-carry": "dist/cli.js"
-  },
+  "description": "Lightweight bridge between Claude Code and chat platforms",
+  "private": true,
   "scripts": {
-    "build": "tsc",
-    "dev": "tsx src/index.ts",
-    "start": "node dist/cli.js start",
-    "cli": "tsx src/cli.ts",
-    "test": "vitest",
-    "test:e2e": "tsx e2e/test.ts",
-    "test:mcp": "tsx e2e/mock-mcp-test.ts",
-    "lint": "eslint src --ext .ts",
-    "typecheck": "tsc --noEmit"
+    "build": "pnpm -r run build",
+    "dev": "pnpm -r run dev",
+    "lint": "pnpm -r run lint",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm -r run test"
   },
   "keywords": [
     "claude",
-    "mcp",
     "feishu",
     "telegram",
-    "whatsapp"
+    "whatsapp",
+    "mcp"
   ],
   "author": "",
   "license": "MIT",
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.0.4",
-    "node-telegram-bot-api": "^0.66.0",
-    "ws": "^8.18.0",
-    "eventemitter3": "^5.0.1",
-    "yaml": "^2.6.1",
-    "commander": "^13.0.0"
-  },
   "devDependencies": {
     "@types/node": "^22.10.2",
-    "@types/ws": "^8.5.13",
-    "@types/node-telegram-bot-api": "^0.64.7",
-    "@typescript-eslint/eslint-plugin": "^8.18.2",
-    "@typescript-eslint/parser": "^8.18.2",
-    "eslint": "^9.17.0",
-    "tsx": "^4.19.2",
-    "typescript": "^5.7.2",
-    "vitest": "^2.1.8"
+    "typescript": "^5.7.2"
   }
 }

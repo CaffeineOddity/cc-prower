@@ -1,0 +1,47 @@
+{
+  "name": "cc-power",
+  "version": "1.0.0",
+  "description": "Lightweight bridge between Claude Code and chat platforms - Service Core",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx cli.ts start",
+    "start": "node dist/cli.js start",
+    "cli": "tsx cli.ts",
+    "test": "vitest",
+    "lint": "eslint . --ext .ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "keywords": [
+    "claude",
+    "feishu",
+    "telegram",
+    "whatsapp"
+  ],
+  "author": "",
+  "license": "MIT",
+  "bin": {
+    "cc-power": "./dist/cli.js"
+  },
+  "dependencies": {
+    "node-telegram-bot-api": "^0.66.0",
+    "eventemitter3": "^5.0.1",
+    "yaml": "^2.6.1",
+    "commander": "^13.0.0",
+    "ws": "^8.18.0",
+    "cc-power-mcp": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "@types/node-telegram-bot-api": "^0.64.7",
+    "@types/ws": "^8.18.1",
+    "@typescript-eslint/eslint-plugin": "^8.18.2",
+    "@typescript-eslint/parser": "^8.18.2",
+    "eslint": "^9.17.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

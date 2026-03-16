@@ -5,12 +5,25 @@ import type {
   MessageRoute,
   ProviderConfig,
   ProjectConfig,
-  MCPMessage,
   IProvider,
-  SendMessageArgs,
-  ListChatsArgs,
-  GetStatusArgs,
 } from '../types/index.js';
+
+// MCP 相关类型（本地定义，因为这些是 MCP 特定的）
+interface SendMessageArgs {
+  provider: string;
+  chat_id: string;
+  content: string;
+  project_id?: string;
+}
+
+interface ListChatsArgs {
+  provider: string;
+  project_id?: string;
+}
+
+interface GetStatusArgs {
+  provider?: string;
+}
 import { ConfigManager } from './config.js';
 import { Logger } from './logger.js';
 import { MessageLogger, type MessageLogEntry } from './message-logger.js';
@@ -187,7 +200,7 @@ export class Router implements IRouter {
   /**
    * 处理 MCP 消息
    */
-  async handleMCPMessage(message: MCPMessage): Promise<void> {
+  async handleMCPMessage(message: any): Promise<void> {
     this.logger.debug(`MCP message: ${JSON.stringify(message)}`);
 
     const { method, params } = message;
@@ -278,10 +291,10 @@ export class Router implements IRouter {
     // 获取指定项目的 Provider
     let targetProjectId = projectId;
     if (!targetProjectId) {
-      // 查找第一个使用该 Provider 的项目
-      const projects = await this.configManager.loadAllProjects();
-      for (const [pid, config] of projects) {
-        if (config.provider === provider) {
+      // 如果没有指定项目 ID，尝试从已注册的项目中查找
+      for (const [pid, prov] of this.providers) {
+        const provName = (prov as any).name || 'unknown';
+        if (provName === provider) {
           targetProjectId = pid;
           break;
         }

@@ -1,9 +1,12 @@
 #!/bin/bash
 
-# cc-connect-carry 开发者配置脚本
-# 用于构建和全局安装 cc-carry
+# cc-power 开发者配置脚本
+# 用于构建和全局安装
 
 set -e
+
+# CLI 名称
+CLI_NAME="cc-power"
 
 # 颜色定义
 RED='\033[0;31m'
@@ -20,13 +23,13 @@ print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 show_usage() {
     echo "用法: ./setup.sh"
     echo ""
-    echo "此脚本在 cc-connect-carry 目录运行，用于:"
-    echo "  - 构建 cc-connect-carry"
-    echo "  - 全局安装 cc-carry"
+    echo "此脚本在 cc-prower 目录运行，用于:"
+    echo "  - 构建 ${CLI_NAME}"
+    echo "  - 全局安装 ${CLI_NAME}"
     echo ""
 }
 
-# 检查是否在 cc-connect-carry 目录
+# 检查是否在 cc-prower 目录
 if [ "$(basename $(pwd))" != "cc-prower" ]; then
     print_error "请在 cc-prower 根目录运行此脚本"
     echo "当前目录: $(pwd)"
@@ -36,7 +39,7 @@ fi
 
 echo ""
 echo "======================================"
-echo "  cc-connect-carry 开发者配置"
+echo "  ${CLI_NAME} 开发者配置"
 echo "======================================"
 echo ""
 
@@ -44,19 +47,19 @@ print_info "当前目录: $(pwd)"
 
 # 构建
 print_info "正在构建..."
-npm run build > /dev/null 2>&1
+pnpm run build > /dev/null 2>&1
 print_success "构建完成"
 
 # 全局安装
-print_info "正在全局安装 cc-carry..."
-npm link > /dev/null 2>&1
+print_info "正在全局安装 ${CLI_NAME}..."
+pnpm link --global cc-power > /dev/null 2>&1
 
 # 验证
-if command -v cc-carry &> /dev/null; then
-    print_success "cc-carry 已安装: $(which cc-carry)"
-    cc-carry --version
+if command -v $CLI_NAME &> /dev/null; then
+    print_success "${CLI_NAME} 已安装: $(which $CLI_NAME)"
+    $CLI_NAME --version
 else
-    print_warning "cc-carry 未在 PATH 中"
+    print_warning "${CLI_NAME} 未在 PATH 中"
 fi
 
 echo ""

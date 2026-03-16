@@ -5,8 +5,72 @@ import {
   ListToolsRequestSchema,
   Tool,
 } from '@modelcontextprotocol/sdk/types.js';
-import type { Router } from './router.js';
-import { Logger } from './logger.js';
+
+/**
+ * MCP 服务器需要调用的后端服务接口
+ */
+export interface BackendService {
+  /**
+   * 注册项目
+   */
+  registerProject(projectId: string, config: any): Promise<void>;
+
+  /**
+   * 取消注册项目
+   */
+  unregisterProject(projectId: string): Promise<void>;
+
+  /**
+   * 发送消息
+   */
+  sendMessage(args: {
+    provider: string;
+    chat_id: string;
+    content: string;
+    project_id?: string;
+  }): Promise<any>;
+
+  /**
+   * 列出聊天
+   */
+  listChats(args: {
+    provider: string;
+    project_id?: string;
+  }): Promise<any>;
+
+  /**
+   * 获取状态
+   */
+  getStatus(args: { provider?: string }): Promise<any>;
+
+  /**
+   * 获取已注册的项目
+   */
+  getRegisteredProjects(): string[];
+
+  /**
+   * 日志记录
+   */
+  logDebug(message: string, ...args: any[]): void;
+  logInfo(message: string, ...args: any[]): void;
+  logWarn(message: string, ...args: any[]): void;
+  logError(message: string, ...args: any[]): void;
+}
+
+/**
+ * MCP 服务器配置
+ */
+export interface MCPServerConfig {
+  /**
+   * 服务器名称
+   */
+  name?: string;
+
+  /**
+   * 服务器版本
+   */
+  version?: string;
+}
 
 /**
  * MCP 服务器
@@ -14,17 +78,15 @@ import { Logger } from './logger.js';
  */
 export class MCPServer {
   private server: Server;
-  private router: Router;
-  private logger: Logger;
+  private backend: BackendService;
   private tools: Tool[];
 
-  constructor(router: Router, logger: Logger) {
-    this.router = router;
-    this.logger = logger;
+  constructor(backend: BackendService, config?: MCPServerConfig) {
+    this.backend = backend;
     this.server = new Server(
       {
-        name: 'cc-connect-carry',
-        version: '1.0.0',
+        name: config?.name || 'cc-connect-carry',
+        version: config?.version || '1.0.0',
       },
       {
         capabilities: {
@@ -157,7 +219,7 @@ export class MCPServer {
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { name, arguments: args } = request.params;
 
-      this.logger.debug(`MCP tool call: ${name}`, args);
+      this.backend.logDebug(`MCP tool call: ${name}`, args);
 
       try {
         let result: any;
@@ -196,7 +258,7 @@ export class MCPServer {
           ],
         };
       } catch (error) {
-        this.logger.error(`Tool call failed: ${name}`, error);
+        this.backend.logError(`Tool call failed: ${name}`, error);
         return {
           content: [
             {
@@ -219,13 +281,7 @@ export class MCPServer {
     content: string;
     project_id?: string;
   }): Promise<any> {
-    await this.router.handleMCPMessage({
-      method: 'tools/call',
-      params: {
-        name: 'send_message',
-        arguments: args,
-      },
-    });
+    await this.backend.sendMessage(args);
 
     return {
       success: true,
@@ -240,30 +296,14 @@ export class MCPServer {
     provider: string;
     project_id?: string;
   }): Promise<any> {
-    const result = await this.router.handleMCPMessage({
-      method: 'tools/call',
-      params: {
-        name: 'list_chats',
-        arguments: args,
-      },
-    });
-
-    return result;
+    return await this.backend.listChats(args);
   }
 
   /**
    * 处理 get_status 工具
    */
   private async getStatus(args: { provider?: string }): Promise<any> {
-    const result = await this.router.handleMCPMessage({
-      method: 'tools/call',
-      params: {
-        name: 'get_status',
-        arguments: args,
-      },
-    });
-
-    return result;
+    return await this.backend.getStatus(args);
   }
 
   /**
@@ -276,7 +316,7 @@ export class MCPServer {
   }): Promise<any> {
     const { project_id: projectId, provider, config } = args;
 
-    this.logger.info(`Registering project via MCP: ${projectId} (${provider})`);
+    this.backend.logInfo(`Registering project via MCP: ${projectId} (${provider})`);
 
     try {
       // 构建项目配置
@@ -287,9 +327,9 @@ export class MCPServer {
       };
 
       // 注册项目
-      await this.router.registerProject(projectId, projectConfig);
+      await this.backend.registerProject(projectId, projectConfig);
 
-      this.logger.info(`Project ${projectId} registered successfully via MCP`);
+      this.backend.logInfo(`Project ${projectId} registered successfully via MCP`);
 
       return {
         success: true,
@@ -297,7 +337,7 @@ export class MCPServer {
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Failed to register project ${projectId} via MCP: ${errorMessage}`);
+      this.backend.logError(`Failed to register project ${projectId} via MCP: ${errorMessage}`);
 
       return {
         success: false,
@@ -314,12 +354,12 @@ export class MCPServer {
   }): Promise<any> {
     const { project_id: projectId } = args;
 
-    this.logger.info(`Unregistering project via MCP: ${projectId}`);
+    this.backend.logInfo(`Unregistering project via MCP: ${projectId}`);
 
     try {
-      await this.router.unregisterProject(projectId);
+      await this.backend.unregisterProject(projectId);
 
-      this.logger.info(`Project ${projectId} unregistered successfully via MCP`);
+      this.backend.logInfo(`Project ${projectId} unregistered successfully via MCP`);
 
       return {
         success: true,
@@ -327,7 +367,7 @@ export class MCPServer {
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Failed to unregister project ${projectId} via MCP: ${errorMessage}`);
+      this.backend.logError(`Failed to unregister project ${projectId} via MCP: ${errorMessage}`);
 
       return {
         success: false,
@@ -342,17 +382,7 @@ export class MCPServer {
   async startStdio(): Promise<void> {
     const transport = new StdioServerTransport();
     await this.server.connect(transport);
-    this.logger.info('MCP server started (stdio mode)');
-  }
-
-  /**
-   * 启动服务器（WebSocket 模式）
-   */
-  async startWebSocket(port: number, host: string = '0.0.0.0'): Promise<void> {
-    // Note: WebSocket transport is not yet fully implemented in MCP SDK
-    // This is a placeholder for future implementation
-    this.logger.info(`WebSocket transport not yet implemented (use stdio mode)`);
-    throw new Error('WebSocket transport not yet implemented. Use stdio mode.');
+    this.backend.logInfo('MCP server started (stdio mode)');
   }
 
   /**
@@ -360,6 +390,8 @@ export class MCPServer {
    */
   async stop(): Promise<void> {
     await this.server.close();
-    this.logger.info('MCP server stopped');
+    this.backend.logInfo('MCP server stopped');
   }
 }
+
+export { MCPServer as default };
