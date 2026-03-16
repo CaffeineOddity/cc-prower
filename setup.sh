@@ -27,8 +27,8 @@ show_usage() {
 }
 
 # 检查是否在 cc-connect-carry 目录
-if [ "$(basename $(pwd))" != "cc-connect-carry" ]; then
-    print_error "请在 cc-connect-carry 根目录运行此脚本"
+if [ "$(basename $(pwd))" != "cc-prower" ]; then
+    print_error "请在 cc-prower 根目录运行此脚本"
     echo "当前目录: $(pwd)"
     show_usage
     exit 1
