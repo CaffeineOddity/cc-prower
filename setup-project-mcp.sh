@@ -3,7 +3,21 @@
 # 项目 MCP 配置脚本
 # 接受项目路径作为参数，在该项目中配置 MCP 服务器
 
+if [ -z "${BASH_VERSION:-}" ]; then
+    script_path="$0"
+    if [ ! -f "$script_path" ]; then
+        script_path="$(ps -p $$ -o args= | awk '{print $2}')"
+    fi
+    exec /bin/bash "$script_path" "$@"
+fi
+
 set -e
+
+SCRIPT_PATH="$0"
+if [ ! -f "$SCRIPT_PATH" ]; then
+    SCRIPT_PATH="$(ps -p $$ -o args= | awk '{print $2}')"
+fi
+SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_PATH")" && pwd)"
 
 # CLI 名称和配置文件
 CLI_NAME="cc-power"
@@ -17,10 +31,43 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-print_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
-print_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
-print_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
-print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+print_info() { printf "%b%s%b %s\n" "$BLUE" "[INFO]" "$NC" "$1"; }
+print_success() { printf "%b%s%b %s\n" "$GREEN" "[SUCCESS]" "$NC" "$1"; }
+print_warning() { printf "%b%s%b %s\n" "$YELLOW" "[WARNING]" "$NC" "$1"; }
+print_error() { printf "%b%s%b %s\n" "$RED" "[ERROR]" "$NC" "$1"; }
+
+# setup_claude_code_hooks <project_path>
+# 将脚本目录下的 Claude Code hooks 复制到项目的 .claude/hooks
+setup_claude_code_hooks() {
+    local project_path="$1"
+
+    echo ""
+    print_info "配置 Claude Code hooks..."
+
+    local hooks_source_dir hooks_dir
+    hooks_source_dir="$SCRIPT_DIR/script/claude_code_hooks"
+
+    if [ -d "$hooks_source_dir" ]; then
+        hooks_dir="$project_path/.claude/hooks"
+        mkdir -p "$hooks_dir"
+
+        if [ -f "$hooks_source_dir/session-start.mjs" ]; then
+            cp "$hooks_source_dir/session-start.mjs" "$hooks_dir/"
+            chmod +x "$hooks_dir/session-start.mjs"
+            print_success "已复制 session-start.mjs"
+        fi
+
+        if [ -f "$hooks_source_dir/session-end.mjs" ]; then
+            cp "$hooks_source_dir/session-end.mjs" "$hooks_dir/"
+            chmod +x "$hooks_dir/session-end.mjs"
+            print_success "已复制 session-end.mjs"
+        fi
+
+        print_info "Hooks 配置完成到: $hooks_dir"
+    else
+        print_warning "未找到 hooks 脚本目录: $hooks_source_dir，跳过 hooks 配置"
+    fi
+}
 
 # 显示使用说明
 show_usage() {
@@ -35,73 +82,100 @@ show_usage() {
     echo ""
 }
 
-# 检查参数
-if [ -z "$1" ]; then
-    print_error "缺少项目路径参数"
-    show_usage
-    exit 1
-fi
+require_project_path_arg() {
+    local project_path_arg="${1:-}"
 
-PROJECT_PATH="$1"
-
-# 转换为绝对路径
-if [[ "$PROJECT_PATH" != /* ]]; then
-    PROJECT_PATH="$(cd "$(dirname "$PROJECT_PATH")" && pwd)/$(basename "$PROJECT_PATH")"
-fi
-
-# 检查项目目录是否存在
-if [ ! -d "$PROJECT_PATH" ]; then
-    print_error "项目目录不存在: $PROJECT_PATH"
-    exit 1
-fi
-
-# 检查 CLI 是否已安装
-if ! command -v $CLI_NAME &> /dev/null; then
-    print_error "${CLI_NAME} 未安装"
-    echo ""
-    echo "请先在 cc-prower 根目录运行:"
-    echo "  cd /path/to/cc-prower"
-    echo "  ./setup.sh"
-    exit 1
-fi
-
-echo ""
-echo "======================================"
-echo "  项目 MCP 配置"
-echo "======================================"
-echo ""
-
-PROJECT_NAME=$(basename "$PROJECT_PATH")
-print_info "项目路径: $PROJECT_PATH"
-print_info "项目名称: $PROJECT_NAME"
-print_success "${CLI_NAME} 已安装: $(which $CLI_NAME)"
-
-# 进入项目目录
-cd "$PROJECT_PATH"
-
-# 检查是否已有配置
-CONFIG_FILE=""
-
-for file in "${CONFIG_FILES[@]}"; do
-    if [ -f "$file" ]; then
-        CONFIG_FILE="$file"
-        print_info "发现现有配置: $CONFIG_FILE"
-        break
+    if [ -z "$project_path_arg" ]; then
+        print_error "缺少项目路径参数"
+        show_usage
+        exit 1
     fi
-done
+}
 
-# 如果没有配置文件，询问创建
-if [ -z "$CONFIG_FILE" ]; then
-    echo ""
-    echo "未找到项目配置文件"
-    echo "请选择:"
-    echo "  1) 创建新的飞书配置"
-    echo "  2) 创建新的 Telegram 配置"
-    echo "  3) 跳过配置"
-    echo ""
-    read -p "请选择 (1-3): " choice
+to_absolute_path() {
+    local input_path="$1"
 
-    case $choice in
+    if [[ "$input_path" != /* ]]; then
+        echo "$(cd "$(dirname "$input_path")" && pwd)/$(basename "$input_path")"
+        return 0
+    fi
+
+    echo "$input_path"
+}
+
+ensure_project_dir_exists() {
+    local project_path="$1"
+
+    if [ ! -d "$project_path" ]; then
+        print_error "项目目录不存在: $project_path"
+        exit 1
+    fi
+}
+
+ensure_cli_installed() {
+    local cli_name="$1"
+
+    if ! command -v "$cli_name" &> /dev/null; then
+        print_error "${cli_name} 未安装"
+        echo ""
+        echo "请先在 cc-prower 根目录运行:"
+        echo "  cd /path/to/cc-prower"
+        echo "  ./setup.sh"
+        exit 1
+    fi
+}
+
+ensure_repo_built() {
+    if [ ! -f "$SCRIPT_DIR/package.json" ]; then
+        print_warning "未找到 cc-prower 根目录 package.json，跳过构建"
+        return 0
+    fi
+
+    if ! command -v pnpm &> /dev/null; then
+        print_warning "pnpm 未安装，跳过构建"
+        return 0
+    fi
+
+    echo ""
+    print_info "构建 cc-power 与 cc-power-mcp..."
+    pnpm -C "$SCRIPT_DIR" run build
+    print_success "构建完成"
+}
+
+print_project_header() {
+    local project_path="$1"
+    local project_name
+    project_name="$(basename "$project_path")"
+
+    echo ""
+    echo "======================================"
+    echo "  项目 MCP 配置"
+    echo "======================================"
+    echo ""
+
+    print_info "项目路径: $project_path"
+    print_info "项目名称: $project_name"
+    print_success "${CLI_NAME} 已安装: $(command -v "$CLI_NAME")"
+}
+
+discover_existing_config() {
+    CONFIG_FILE=""
+
+    local file
+    for file in "${CONFIG_FILES[@]}"; do
+        if [ -f "$file" ]; then
+            CONFIG_FILE="$file"
+            print_info "发现现有配置: $CONFIG_FILE"
+            return 0
+        fi
+    done
+}
+
+create_config_template() {
+    local choice="$1"
+    local project_path="$2"
+
+    case "$choice" in
         1)
             CONFIG_FILE=".cc-power.yaml"
             print_info "创建飞书配置模板..."
@@ -119,7 +193,7 @@ session:
   max_history: 50
   timeout_minutes: 30
 EOF
-            print_success "已创建配置文件: $PROJECT_PATH/$CONFIG_FILE"
+            print_success "已创建配置文件: $project_path/$CONFIG_FILE"
             print_warning "请更新 $CONFIG_FILE 中的凭证信息"
             ;;
         2)
@@ -136,7 +210,7 @@ session:
   max_history: 50
   timeout_minutes: 30
 EOF
-            print_success "已创建配置文件: $PROJECT_PATH/$CONFIG_FILE"
+            print_success "已创建配置文件: $project_path/$CONFIG_FILE"
             print_warning "请更新 $CONFIG_FILE 中的凭证信息"
             ;;
         3)
@@ -147,54 +221,194 @@ EOF
             exit 1
             ;;
     esac
-fi
+}
 
-# 配置 MCP
-echo ""
-print_info "配置 MCP 服务器..."
+ensure_project_config() {
+    local project_path="$1"
 
-# 检查是否已配置
-if claude mcp list 2>&1 | grep -q "$MCP_NAME"; then
+    discover_existing_config
+    if [ -n "$CONFIG_FILE" ]; then
+        return 0
+    fi
+
+    echo ""
+    echo "未找到项目配置文件"
+    echo "请选择:"
+    echo "  1) 创建新的飞书配置"
+    echo "  2) 创建新的 Telegram 配置"
+    echo "  3) 跳过配置"
+    echo ""
+    read -p "请选择 (1-3): " choice
+
+    create_config_template "$choice" "$project_path"
+}
+
+choose_transport_mode() {
+    echo ""
+    echo "请选择 MCP 传输模式:"
+    echo "  1) STDIO - 模式简单，适合开发使用（推荐）"
+    echo "  2) HTTP/SSE - 需要单独启动服务器，适合生产环境"
+    echo ""
+    read -p "请选择 (1-2) [1]: " transport_choice
+    transport_choice="${transport_choice:-1}"
+}
+
+mcp_server_exists() {
+    claude mcp list 2>&1 | grep -q "$MCP_NAME"
+}
+
+remove_existing_mcp_server() {
+    claude mcp remove "$MCP_NAME" -s local > /dev/null 2>&1 || true
+}
+
+prepare_mcp_configuration() {
+    MCP_ADD_MESSAGE="添加 MCP 服务器..."
+
+    if ! mcp_server_exists; then
+        return 0
+    fi
+
     print_warning "$MCP_NAME MCP 服务器已存在"
     read -p "是否重新配置? (y/N): " reconfig
     if [[ ! $reconfig =~ ^[Yy]$ ]]; then
         print_info "保持现有配置"
-    else
-        print_info "移除现有配置..."
-        claude mcp remove $MCP_NAME -s local > /dev/null 2>&1 || true
-        print_info "添加新的 MCP 服务器..."
-        if claude mcp add $MCP_NAME -- $CLI_NAME start > /dev/null 2>&1; then
-            print_success "MCP 服务器配置成功"
-        else
-            print_error "MCP 服务器配置失败"
+        return 1
+    fi
+
+    print_info "移除现有配置..."
+    remove_existing_mcp_server
+    MCP_ADD_MESSAGE="添加新的 MCP 服务器..."
+    return 0
+}
+
+get_http_port() {
+    local project_path="$1"
+    local port="8888"
+    local global_config
+    global_config="$(dirname "$project_path")/config.yaml"
+
+    if [ -f "$global_config" ]; then
+        port="$(grep -E "^\s*port:" "$global_config" | awk '{print $2}' || echo "8888")"
+        if [ -z "$port" ]; then
+            port="8888"
         fi
     fi
-else
-    print_info "添加 MCP 服务器..."
-    if claude mcp add $MCP_NAME -- $CLI_NAME start > /dev/null 2>&1; then
+
+    echo "$port"
+}
+
+configure_mcp_http() {
+    local project_path="$1"
+
+    print_info "使用 HTTP/SSE 模式"
+
+    local port mcp_url
+    port="$(get_http_port "$project_path")"
+    mcp_url="http://127.0.0.1:$port/mcp"
+
+    if ! prepare_mcp_configuration; then
+        echo ""
+        print_warning "HTTP 模式需要单独启动服务器！"
+        echo "运行以下命令启动服务器:"
+        echo "  $CLI_NAME start"
+        echo ""
+        return 0
+    fi
+
+    print_info "$MCP_ADD_MESSAGE"
+    if claude mcp add --transport http "$MCP_NAME" "$mcp_url" > /dev/null 2>&1; then
+        print_success "MCP 服务器配置成功 (URL: $mcp_url)"
+    else
+        print_error "MCP 服务器配置失败"
+    fi
+
+    echo ""
+    print_warning "HTTP 模式需要单独启动服务器！"
+    echo "运行以下命令启动服务器:"
+    echo "  $CLI_NAME start"
+    echo ""
+}
+
+configure_mcp_stdio() {
+    print_info "使用 STDIO 模式"
+
+    if ! prepare_mcp_configuration; then
+        return 0
+    fi
+
+    print_info "$MCP_ADD_MESSAGE"
+    if claude mcp add "$MCP_NAME" -- "$CLI_NAME" start --stdio > /dev/null 2>&1; then
         print_success "MCP 服务器配置成功"
     else
         print_error "MCP 服务器配置失败"
     fi
-fi
+}
 
-# 验证
-echo ""
-print_info "验证配置..."
+configure_mcp_server() {
+    local project_path="$1"
+    local selected_transport="$2"
 
-echo ""
-echo "=== MCP 服务器状态 ==="
-claude mcp list 2>&1 | grep -E "$MCP_NAME|Checking" || echo "  $MCP_NAME 未配置"
+    echo ""
+    print_info "配置 MCP 服务器..."
 
-echo ""
-print_success "配置完成！"
-echo ""
-echo "使用方法:"
-echo "  cd $PROJECT_PATH"
-echo "  claude"
-echo ""
-echo "可用工具:"
-echo "  - send_message: 发送消息"
-echo "  - list_chats: 列出聊天"
-echo "  - get_status: 获取状态"
-echo ""
+    if [ "$selected_transport" = "2" ]; then
+        configure_mcp_http "$project_path"
+    else
+        configure_mcp_stdio
+    fi
+}
+
+verify_configuration() {
+    echo ""
+    print_info "验证配置..."
+
+    echo ""
+    echo "=== MCP 服务器状态 ==="
+    claude mcp list 2>&1 | grep -E "$MCP_NAME|Checking" || echo "  $MCP_NAME 未配置"
+}
+
+print_post_instructions() {
+    local project_path="$1"
+    local selected_transport="$2"
+
+    echo ""
+    print_success "配置完成！"
+    echo ""
+    echo "使用方法:"
+    if [ "$selected_transport" = "2" ]; then
+        echo "  1. 启动 HTTP 服务器（在一个新终端）:"
+        echo "     $CLI_NAME start"
+        echo ""
+        echo "  2. 进入项目目录并启动 Claude Code:"
+        echo "     cd $project_path"
+        echo "     claude"
+        echo ""
+        echo "  注意: HTTP 模式需要保持服务器运行"
+    else
+        echo "  cd $project_path"
+        echo "  claude"
+        echo ""
+        echo "  注意: STDIO 模式下 MCP 服务器会自动启动，无需手动启动"
+    fi
+}
+
+main() {
+    require_project_path_arg "${1:-}"
+
+    PROJECT_PATH="$(to_absolute_path "$1")"
+    ensure_project_dir_exists "$PROJECT_PATH"
+    ensure_cli_installed "$CLI_NAME"
+    print_project_header "$PROJECT_PATH"
+    ensure_repo_built
+
+    cd "$PROJECT_PATH"
+    ensure_project_config "$PROJECT_PATH"
+
+    choose_transport_mode
+    configure_mcp_server "$PROJECT_PATH" "$transport_choice"
+    setup_claude_code_hooks "$PROJECT_PATH"
+    verify_configuration
+    print_post_instructions "$PROJECT_PATH" "$transport_choice"
+}
+
+main "$@"

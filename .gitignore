@@ -5,3 +5,7 @@ dist/
 .env
 .env.local
 logs/
+cc-power-mcp/src/**/*.js
+cc-power-mcp/src/**/*.js.map
+cc-power-mcp/src/**/*.d.ts
+cc-power-mcp/src/**/*.d.ts.map

@@ -1,14 +1,12 @@
 #!/usr/bin/env node
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import * as yaml from 'yaml';
 import { Command } from 'commander';
 import { ConfigManager } from './core/config.js';
 import { Logger } from './core/logger.js';
 import { Router } from './core/router.js';
 import { MessageLogger } from './core/message-logger.js';
-import { MCPServer } from '../cc-power-mcp/src/mcp/index.js';
-import type { ProjectConfig } from './types/config.js';
+import { MCPServer } from 'cc-power-mcp';
 
 const CLI_NAME = 'cc-power';
 const CLI_VERSION = '1.0.0';
@@ -25,6 +23,7 @@ program
   .command('start')
   .description(`Start the ${CLI_NAME} service`)
   .option('-c, --config <path>', 'Path to config file', './config.yaml')
+  .option('--stdio', 'Force stdio mode for MCP (useful when configured as stdio MCP server)')
   .action(async (options) => {
     await startService(options);
   });
@@ -72,7 +71,7 @@ program.parse();
  * 启动服务
  */
 async function startService(options: any) {
-  const { config: configPath } = options;
+  const { config: configPath, stdio: forceStdio } = options;
 
   console.log(`Starting ${CLI_NAME}...`);
 
@@ -84,9 +83,12 @@ async function startService(options: any) {
   // 创建日志器
   const logger = new Logger(globalConfig.logging);
 
+  // 如果设置了 --stdio 标志，强制使用 stdio 模式
+  const transportMode = forceStdio ? 'stdio' : globalConfig.mcp.transport;
+
   logger.info(`${CLI_NAME} starting...`);
   logger.info(`Config: ${actualConfigPath}`);
-  logger.info(`Transport: ${globalConfig.mcp.transport}`);
+  logger.info(`Transport: ${transportMode}${forceStdio ? ' (forced by --stdio flag)' : ''}`);
 
   // 创建消息日志器
   const messageLogger = new MessageLogger('./logs/messages');
@@ -188,14 +190,14 @@ async function startService(options: any) {
   const mcpServer = new MCPServer(backend, {
     name: CLI_NAME,
     version: CLI_VERSION,
-    http: globalConfig.mcp.transport === 'http' ? {
+    http: transportMode === 'http' ? {
       port: globalConfig.mcp.port || 8080,
       host: '127.0.0.1',
     } : undefined,
   });
 
   // 根据传输方式启动
-  if (globalConfig.mcp.transport === 'http') {
+  if (transportMode === 'http') {
     console.log(`${CLI_NAME} is ready. Listening on port ${globalConfig.mcp.port || 8080}.`);
     console.log('Projects will be registered when clients connect via MCP.');
     console.log('Press Ctrl+C to stop the server.\n');

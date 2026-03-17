@@ -690,6 +690,7 @@ export class MCPServer {
     // Create StreamableHTTPServerTransport
     this.transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => crypto.randomUUID(),
+      enableJsonResponse: true, // Enable simple JSON response for compatibility
     });
 
     // Connect server to transport
@@ -702,34 +703,581 @@ export class MCPServer {
       }
     });
 
-    // Set up MCP endpoint
-    this.expressApp.all('/mcp', (req: IncomingMessage, res: ServerResponse) => {
-      this.transport?.handleRequest(req, res);
+    // Set up MCP endpoint with middleware for health checks
+    this.expressApp.all('/mcp', async (req: any, res: any, next: any) => {
+      // Handle simple GET requests for health checks (without SSE requirement)
+      if (req.method === 'GET' && !req.headers.accept?.includes('text/event-stream')) {
+        this.backend.logDebug(`Simple GET request to /mcp - returning OK for health check`);
+        res.status(200).json({
+          status: 'ok',
+          server: 'cc-power-mcp',
+          transport: 'http',
+          protocol: 'mcp',
+        });
+        return;
+      }
+
+      // Debug: log incoming requests
+      this.backend.logDebug(`MCP request: ${req.method} ${req.url}`);
+      this.backend.logDebug(`Accept header: ${req.headers.accept || 'none'}`);
+      this.backend.logDebug(`Content-Type header: ${req.headers['content-type'] || 'none'}`);
+      this.backend.logDebug(`Mcp-Session-Id header: ${req.headers['mcp-session-id'] || 'none'}`);
+
+      // Log request body for POST requests
+      if (req.method === 'POST' && req.body) {
+        this.backend.logDebug(`Request body: ${JSON.stringify(req.body)}`);
+      }
+
+      // Pass parsed body if available (for POST requests)
+      try {
+        await this.transport?.handleRequest(req, res, req.body);
+        this.backend.logDebug(`Request handled successfully`);
+      } catch (error) {
+        this.backend.logError(`Error handling MCP request:`, error);
+      }
     });
 
-    // Start Express server
-    this.expressServer = this.expressApp.listen(port, host, () => {
-      this.backend.logInfo(`MCP server started (HTTP mode) on http://${host}:${port}`);
+    // Set up monitoring page
+    this.setupMonitoringPage();
+
+    // Set up health check endpoint (for MCP client health checks)
+    this.expressApp.get('/health', (req: any, res: any) => {
+      this.backend.logDebug(`Health check request from ${req.ip || 'unknown'}`);
+      res.status(200).json({ status: 'ok', server: 'cc-power-mcp', timestamp: Date.now() });
     });
 
-    return new Promise((resolve) => {
-      this.expressServer.on('listening', resolve);
+    // Set up root endpoint
+    this.expressApp.get('/', (req: any, res: any) => {
+      this.backend.logDebug(`Root request from ${req.ip || 'unknown'}`);
+      res.redirect('/status');
     });
+
+    // Set up status API endpoint
+    this.expressApp.get('/api/status', (req: any, res: any) => {
+      const status = this.getFullStatus();
+      res.json(status);
+    });
+
+    // Start Express server with port cleanup and retry logic
+    const startWithRetry = async (attempt: number = 1): Promise<void> => {
+      return new Promise<void>((resolve, reject) => {
+        this.expressServer = this.expressApp!.listen(port, host);
+
+        const errorHandler = (err: any) => {
+          if (err.code === 'EADDRINUSE') {
+            this.expressServer?.removeAllListeners('listening');
+            this.expressServer?.removeAllListeners('error');
+            this.expressServer?.close();
+
+            this.backend.logWarn(`Port ${port} is in use, attempting to cleanup... (attempt ${attempt}/3)`);
+
+            // Try to cleanup the port
+            this.cleanupPort(port)
+              .then(() => {
+                // Wait a bit for port to be released
+                setTimeout(() => {
+                  if (attempt < 3) {
+                    // Retry
+                    startWithRetry(attempt + 1).then(resolve).catch(reject);
+                  } else {
+                    reject(new Error(`Port ${port} is still in use after ${attempt} attempts. Please manually kill the process using this port.`));
+                  }
+                }, 1000);
+              })
+              .catch((cleanupErr) => {
+                reject(new Error(`Port ${port} is already in use and cleanup failed: ${cleanupErr}`));
+              });
+          } else {
+            reject(err);
+          }
+        };
+
+        this.expressServer!.once('listening', () => {
+          this.backend.logInfo(`MCP server started (HTTP mode) on http://${host}:${port}`);
+          this.backend.logInfo(`Monitoring dashboard available at http://${host}:${port}/status`);
+          resolve();
+        });
+
+        this.expressServer!.once('error', errorHandler);
+      });
+    };
+
+    return startWithRetry();
+  }
+
+  /**
+   * 清理占用指定端口的进程
+   */
+  private async cleanupPort(port: number): Promise<void> {
+    const { execSync } = await import('child_process');
+
+    try {
+      // 获取占用端口的进程 PID
+      const result = execSync(`lsof -ti:${port}`, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
+      const pids = result.trim().split('\n').filter(Boolean);
+
+      if (pids.length === 0) {
+        return;
+      }
+
+      this.backend.logInfo(`Found ${pids.length} process(es) using port ${port}: ${pids.join(', ')}`);
+
+      // 杀掉所有占用端口的进程
+      for (const pid of pids) {
+        try {
+          execSync(`kill -9 ${pid}`, { stdio: ['ignore', 'pipe', 'ignore'] });
+          this.backend.logInfo(`Killed process ${pid}`);
+        } catch (error) {
+          this.backend.logWarn(`Failed to kill process ${pid}:`, error);
+        }
+      }
+    } catch (error) {
+      // lsof 返回非 0 表示没有找到进程，忽略错误
+      const err = error as any;
+      if (err.status !== 1) {
+        throw error;
+      }
+    }
+  }
+
+  /**
+   * 获取完整状态信息
+   */
+  private getFullStatus(): any {
+    const projects = this.backend.getRegisteredProjects();
+    const projectStatuses: any[] = [];
+
+    for (const projectId of projects) {
+      const heartbeatStatus = this.backend.getProjectHeartbeatStatus(projectId);
+      const timeSinceLast = Date.now() - heartbeatStatus.lastHeartbeat;
+
+      projectStatuses.push({
+        project_id: projectId,
+        is_alive: heartbeatStatus.isAlive,
+        last_heartbeat: heartbeatStatus.lastHeartbeat,
+        time_since_last_ms: timeSinceLast,
+        time_since_last_text: this.formatTimeSinceLast(heartbeatStatus.lastHeartbeat),
+      });
+    }
+
+    return {
+      server: {
+        name: 'cc-power',
+        version: '1.0.0',
+        uptime: process.uptime(),
+        uptime_text: this.formatUptime(process.uptime()),
+        timestamp: Date.now(),
+      },
+      transport: 'http',
+      projects: projectStatuses,
+      total_projects: projects.length,
+      alive_projects: projectStatuses.filter(p => p.is_alive).length,
+    };
+  }
+
+  /**
+   * 格式化时间间隔
+   */
+  private formatTimeSinceLast(lastHeartbeat: number): string {
+    if (lastHeartbeat === 0) {
+      return '从未';
+    }
+
+    const diff = Date.now() - lastHeartbeat;
+
+    if (diff < 1000) {
+      return `${diff}ms 前`;
+    } else if (diff < 60000) {
+      return `${Math.floor(diff / 1000)}秒前`;
+    } else if (diff < 3600000) {
+      return `${Math.floor(diff / 60000)}分钟前`;
+    } else {
+      return `${Math.floor(diff / 3600000)}小时前`;
+    }
+  }
+
+  /**
+   * 格式化运行时间
+   */
+  private formatUptime(uptime: number): string {
+    const hours = Math.floor(uptime / 3600);
+    const minutes = Math.floor((uptime % 3600) / 60);
+    const seconds = Math.floor(uptime % 60);
+
+    if (hours > 0) {
+      return `${hours}小时 ${minutes}分钟 ${seconds}秒`;
+    } else if (minutes > 0) {
+      return `${minutes}分钟 ${seconds}秒`;
+    } else {
+      return `${seconds}秒`;
+    }
+  }
+
+  /**
+   * 设置监控页面
+   */
+  private setupMonitoringPage(): void {
+    if (!this.expressApp) return;
+
+    this.expressApp.get('/', (req: any, res: any) => {
+      res.redirect('/status');
+    });
+
+    this.expressApp.get('/status', (req: any, res: any) => {
+      const html = this.getMonitoringHTML();
+      res.setHeader('Content-Type', 'text/html; charset=utf-8');
+      res.send(html);
+    });
+  }
+
+  /**
+   * 获取监控页面 HTML
+   */
+  private getMonitoringHTML(): string {
+    return `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CC-Power 服务监控</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB',
+        'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      min-height: 100vh;
+      padding: 20px;
+      color: #333;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    .header {
+      background: white;
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 20px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    .header h1 {
+      font-size: 28px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .header p {
+      color: #666;
+      font-size: 14px;
+    }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+
+    .stat-card {
+      background: white;
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    .stat-card h3 {
+      font-size: 12px;
+      font-weight: 600;
+      color: #666;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+      letter-spacing: 0.5px;
+    }
+
+    .stat-card .value {
+      font-size: 32px;
+      font-weight: 700;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .stat-card .sub {
+      font-size: 12px;
+      color: #999;
+      margin-top: 4px;
+    }
+
+    .projects-section {
+      background: white;
+      border-radius: 12px;
+      padding: 24px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+
+    .projects-section h2 {
+      font-size: 20px;
+      font-weight: 600;
+      margin-bottom: 16px;
+    }
+
+    .project-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    .project-table th {
+      text-align: left;
+      padding: 12px;
+      font-size: 12px;
+      font-weight: 600;
+      color: #666;
+      text-transform: uppercase;
+      border-bottom: 2px solid #f0f0f0;
+    }
+
+    .project-table td {
+      padding: 16px 12px;
+      border-bottom: 1px solid #f0f0f0;
+    }
+
+    .project-table tr:hover {
+      background: #f9f9f9;
+    }
+
+    .status-badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-size: 12px;
+      font-weight: 600;
+    }
+
+    .status-alive {
+      background: #e6fffa;
+      color: #00b894;
+    }
+
+    .status-dead {
+      background: #fff5f5;
+      color: #e74c3c;
+    }
+
+    .last-updated {
+      text-align: center;
+      padding: 16px;
+      color: #999;
+      font-size: 14px;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 40px;
+      color: #999;
+    }
+
+    .empty-state svg {
+      width: 64px;
+      height: 64px;
+      margin-bottom: 16px;
+      opacity: 0.5;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+    .pulse {
+      animation: pulse 2s infinite;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🚀 CC-Power 服务监控</h1>
+      <p>实时监控服务状态、项目注册和心跳信息</p>
+    </div>
+
+    <div class="stats">
+      <div class="stat-card">
+        <h3>服务状态</h3>
+        <div class="value">运行中</div>
+        <div class="sub" id="uptime">加载中...</div>
+      </div>
+      <div class="stat-card">
+        <h3>已注册项目</h3>
+        <div class="value" id="total-projects">-</div>
+        <div class="sub">总计</div>
+      </div>
+      <div class="stat-card">
+        <h3>活跃项目</h3>
+        <div class="value" id="alive-projects">-</div>
+        <div class="sub">心跳正常</div>
+      </div>
+      <div class="stat-card">
+        <h3>传输方式</h3>
+        <div class="value">HTTP</div>
+        <div class="sub">MCP 服务器</div>
+      </div>
+    </div>
+
+    <div class="projects-section">
+      <h2>📋 项目列表</h2>
+      <table class="project-table">
+        <thead>
+          <tr>
+            <th>项目 ID</th>
+            <th>状态</th>
+            <th>最后心跳</th>
+            <th>心跳间隔</th>
+          </tr>
+        </thead>
+        <tbody id="projects-body">
+          <tr>
+            <td colspan="4" class="empty-state">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="10"></circle>
+                <line x1="12" y1="16" x2="12" y2="12"></line>
+                <line x1="12" y1="8" x2="12.01" y2="8"></line>
+              </svg>
+              <p>暂无注册项目</p>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="last-updated">
+      <span class="pulse">●</span> 自动刷新中 · 最后更新: <span id="last-updated">-</span>
+    </div>
+  </div>
+
+  <script>
+    // 获取状态并更新页面
+    async function updateStatus() {
+      try {
+        const response = await fetch('/api/status');
+        const data = await response.json();
+
+        // 更新运行时间
+        document.getElementById('uptime').textContent = data.server.uptime_text;
+
+        // 更新项目统计
+        document.getElementById('total-projects').textContent = data.total_projects;
+        document.getElementById('alive-projects').textContent = data.alive_projects;
+
+        // 更新项目列表
+        const tbody = document.getElementById('projects-body');
+        if (data.projects.length === 0) {
+          tbody.innerHTML = \`
+            <tr>
+              <td colspan="4" class="empty-state">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="10"></circle>
+                  <line x1="12" y1="16" x2="12" y2="12"></line>
+                  <line x1="12" y1="8" x2="12.01" y2="8"></line>
+                </svg>
+                <p>暂无注册项目</p>
+              </td>
+            </tr>
+          \`;
+        } else {
+          tbody.innerHTML = data.projects.map(project => \`
+            <tr>
+              <td>
+                <strong>\${escapeHtml(project.project_id)}</strong>
+              </td>
+              <td>
+                <span class="status-badge \${project.is_alive ? 'status-alive' : 'status-dead'}">
+                  \${project.is_alive ? '● 活跃' : '○ 离线'}
+                </span>
+              </td>
+              <td>\${project.time_since_last_text}</td>
+              <td>\${formatDuration(project.time_since_last_ms)}</td>
+            </tr>
+          \`).join('');
+        }
+
+        // 更新最后更新时间
+        document.getElementById('last-updated').textContent = new Date().toLocaleTimeString('zh-CN');
+      } catch (error) {
+        console.error('Failed to fetch status:', error);
+      }
+    }
+
+    // 格式化持续时间
+    function formatDuration(ms) {
+      if (ms < 1000) return ms + 'ms';
+      if (ms < 60000) return (ms / 1000).toFixed(1) + 's';
+      if (ms < 3600000) return (ms / 60000).toFixed(1) + 'min';
+      return (ms / 3600000).toFixed(1) + 'h';
+    }
+
+    // 转义 HTML
+    function escapeHtml(text) {
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
+
+    // 初始化
+    updateStatus();
+    setInterval(updateStatus, 3000); // 每3秒更新一次
+  </script>
+</body>
+</html>`;
   }
 
   /**
    * 停止服务器
    */
   async stop(): Promise<void> {
+    // 先关闭 MCP server
     await this.server.close();
+
+    // 关闭 Express 服务器
+    if (this.expressServer) {
+      await new Promise<void>((resolve, reject) => {
+        // 设置超时，防止 close 回调不被调用
+        const timeout = setTimeout(() => {
+          this.expressServer?.removeAllListeners();
+          resolve();
+        }, 5000);
+
+        this.expressServer.close((err?: any) => {
+          clearTimeout(timeout);
+          if (err) {
+            this.backend.logWarn('Express server close warning:', err);
+          }
+          resolve();
+        });
+      });
+      this.expressServer = null;
+    }
+
+    // 关闭 transport
     if (this.transport) {
       await this.transport.close();
+      this.transport = null;
     }
-    if (this.expressServer) {
-      await new Promise<void>((resolve) => {
-        this.expressServer.close(() => resolve());
-      });
-    }
+
+    this.expressApp = null;
     this.backend.logInfo('MCP server stopped');
   }
 }

@@ -6,9 +6,9 @@
   "scripts": {
     "build": "pnpm -r run build",
     "dev": "pnpm -r run dev",
-    "lint": "pnpm -r run lint",
+    "lint": "pnpm -r --if-present run lint",
     "typecheck": "pnpm -r run typecheck",
-    "test": "pnpm -r run test",
+    "test": "pnpm -r --if-present run test",
     "test:e2e": "node run-e2e-tests.mjs",
     "test:e2e:runner": "npx tsx e2e-test/test-runner.mjs",
     "test:e2e:core": "npx tsx e2e-test/test-core.mjs",

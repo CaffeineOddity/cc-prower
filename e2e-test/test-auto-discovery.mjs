@@ -4,7 +4,7 @@
  * Tests signal file processing for automatic project registration/unregistration
  */
 
-import { MCPServer } from '../cc-power-mcp/src/mcp/index.js';
+import { MCPServer } from '../cc-power-mcp/src/mcp/index.ts';
 import { Logger } from '../cc-power/core/logger.js';
 import { ConfigManager } from '../cc-power/core/config.js';
 import { Router } from '../cc-power/core/router.js';

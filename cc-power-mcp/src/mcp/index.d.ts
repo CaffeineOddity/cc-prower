@@ -160,6 +160,30 @@ export declare class MCPServer {
      */
     startHTTP(port?: number, host?: string): Promise<void>;
     /**
+     * 清理占用指定端口的进程
+     */
+    private cleanupPort;
+    /**
+     * 获取完整状态信息
+     */
+    private getFullStatus;
+    /**
+     * 格式化时间间隔
+     */
+    private formatTimeSinceLast;
+    /**
+     * 格式化运行时间
+     */
+    private formatUptime;
+    /**
+     * 设置监控页面
+     */
+    private setupMonitoringPage;
+    /**
+     * 获取监控页面 HTML
+     */
+    private getMonitoringHTML;
+    /**
      * 停止服务器
      */
     stop(): Promise<void>;
