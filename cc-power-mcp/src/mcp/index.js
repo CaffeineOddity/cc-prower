@@ -17,8 +17,10 @@ export class MCPServer {
     transport = null;
     expressApp = null;
     expressServer = null;
+    config;
     constructor(backend, config) {
         this.backend = backend;
+        this.config = config;
         this.server = new Server({
             name: config?.name || 'cc-connect-carry',
             version: config?.version || '1.0.0',
@@ -494,6 +496,23 @@ export class MCPServer {
         this.backend.logInfo('MCP server started (stdio mode)');
     }
     /**
+     * 重置 MCP Server 和处理器
+     * 用于在新的客户端连接时（如 Claude Code 重启）清除已初始化的状态，防止抛出 Server already initialized 错误。
+     */
+    resetServer() {
+        this.server = new Server({
+            name: this.config?.name || 'cc-connect-carry',
+            version: this.config?.version || '1.0.0',
+        }, {
+            capabilities: {
+                tools: {},
+                // Enable notifications for HTTP transport
+                ...(this.config?.http ? { experimental: { notifications: {} } } : {}),
+            },
+        });
+        this.setupHandlers();
+    }
+    /**
      * 启动服务器（HTTP/SSE 模式）
      */
     async startHTTP(port = 8080, host = '127.0.0.1') {
@@ -501,7 +520,7 @@ export class MCPServer {
         this.expressApp = createMcpExpressApp();
         // Create StreamableHTTPServerTransport
         this.transport = new StreamableHTTPServerTransport({
-            // sessionIdGenerator: () => crypto.randomUUID(), // Remove to enable stateless mode to allow multiple clients/restarts
+            sessionIdGenerator: () => crypto.randomUUID(),
             enableJsonResponse: true, // Enable simple JSON response for compatibility
         });
         // Connect server to transport
@@ -533,6 +552,27 @@ export class MCPServer {
             // Log request body for POST requests
             if (req.method === 'POST' && req.body) {
                 this.backend.logDebug(`Request body: ${JSON.stringify(req.body)}`);
+            }
+            // Check if this is an initialization request (client reconnecting)
+            // Claude Code sends a POST request with method="initialize" and no session ID on first connect
+            if (req.method === 'POST' && req.body && req.body.method === 'initialize' && !req.headers['mcp-session-id']) {
+                this.backend.logInfo('New initialize request received, resetting MCP server and transport...');
+                // Close old transport
+                if (this.transport) {
+                    try {
+                        await this.transport.close();
+                    }
+                    catch (e) { }
+                }
+                // Recreate Server instance to clear internal initialized state
+                this.resetServer();
+                // Recreate Transport instance
+                this.transport = new StreamableHTTPServerTransport({
+                    sessionIdGenerator: () => crypto.randomUUID(),
+                    enableJsonResponse: true,
+                });
+                // Reconnect
+                await this.server.connect(this.transport);
             }
             // Pass parsed body if available (for POST requests)
             try {

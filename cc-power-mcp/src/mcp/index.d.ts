@@ -98,6 +98,7 @@ export declare class MCPServer {
     private transport;
     private expressApp;
     private expressServer;
+    private config?;
     constructor(backend: BackendService, config?: MCPServerConfig);
     /**
      * 定义 MCP 工具
@@ -155,6 +156,11 @@ export declare class MCPServer {
      * 启动服务器（stdio 模式）
      */
     startStdio(): Promise<void>;
+    /**
+     * 重置 MCP Server 和处理器
+     * 用于在新的客户端连接时（如 Claude Code 重启）清除已初始化的状态，防止抛出 Server already initialized 错误。
+     */
+    private resetServer;
     /**
      * 启动服务器（HTTP/SSE 模式）
      */
