@@ -1,219 +1,142 @@
-# CC-Power
+# CC-Power: Claude Code × Chat Platforms Bridge
 
-轻量级桥接服务，连接 Claude Code 和聊天平台（飞书、Telegram、WhatsApp）。
+A lightweight bridge connecting Claude Code with chat platforms (Feishu, Telegram, WhatsApp) via Model Context Protocol (MCP). This service enables Claude Code to receive and respond to messages from various chat platforms while maintaining secure and organized project isolation.
 
-## 功能特性
+## Architecture
 
-- 🚀 **轻量级设计** - 基于 MCP (Model Context Protocol) 协议
-- 🔄 **多种传输模式** - 支持 STDIO 和 HTTP/SSE 两种模式
-- 💬 **多平台支持** - 飞书、Telegram、WhatsApp
-- 📊 **监控面板** - HTTP 模式提供实时监控面板
-- 🧠 **会话管理** - 自动管理聊天历史和超时
+The CC-Power service implements a unified architecture supporting multiple projects under a single backend service:
 
-## 安装
+### Core Components
+- **MCP Server**: Communicates with Claude Code instances via stdio transport
+- **Router**: Routes messages between Claude Code instances and multiple chat platforms
+- **Provider Adapters**: Connect to individual chat platforms (Feishu, Telegram, WhatsApp)
+- **Signal File System**: Implements automatic project registration/unregistration via file system signals
+- **Tmux Integration**: Enables shared sessions between local users and remote chat platforms
 
-### 1. 构建和全局安装
+### New Architecture Features (v2.0)
+- **File System Signal Listening**: Projects automatically register by creating signal files in `~/.cc-power/signals/`
+- **Tmux Shared Sessions**: Local users and remote IM users share the same Claude Code terminal session
+- **Auto-Wakeup**: Dormant projects automatically start when receiving new messages
+- **Single Backend**: One CC-Power service manages multiple concurrent projects
+- **Reduced MCP Tools**: Removed heartbeat-related tools in favor of Tmux-based session monitoring
+- **Enhanced Loopback**: Automatic system prompts to ensure Claude uses send_message tool to respond
 
+## Quick Start
+
+### 1. Install Dependencies
 ```bash
-# 在项目根目录运行
-./setup.sh
+npm install -g @modelcontextprotocol/cli
+pnpm install
 ```
 
-### 2. 配置项目
-
-```bash
-# 配置你的项目
-./setup-project-mcp.sh /path/to/your/project
-```
-
-配置脚本会让你选择传输模式：
-
-**选项 1: STDIO 模式** (推荐用于开发)
-- MCP 服务器由 Claude Code 自动启动
-- 无需手动启动服务
-- 简单易用
-
-**选项 2: HTTP/SSE 模式** (推荐用于生产)
-- 需要单独启动 HTTP 服务器
-- 提供监控面板
-- 支持多客户端连接
-
-## 使用方法
-
-### STDIO 模式
-
-```bash
-cd /path/to/your/project
-claude
-```
-
-Claude Code 会自动启动 MCP 服务器，无需额外操作。
-
-### HTTP/SSE 模式
-
-1. **启动 HTTP 服务器**（在一个新终端）：
-
-```bash
-cd /path/to/project-root
-cc-power start
-```
-
-服务器默认运行在 `http://127.0.0.1:8888`
-
-2. **监控面板**：
-
-打开浏览器访问 `http://127.0.0.1:8888/status` 查看服务状态
-
-3. **使用 Claude Code**：
-
-```bash
-cd /path/to/your/project
-claude
-```
-
-## 可用工具
-
-| 工具名 | 描述 |
-|--------|------|
-| `send_message` | 发送消息到聊天平台 |
-| `list_chats` | 列出可用的聊天 |
-| `get_status` | 获取服务状态 |
-| `register_project` | 注册项目配置 |
-| `unregister_project` | 取消注册项目 |
-| `send_heartbeat` | 发送心跳保持连接 |
-| `get_heartbeat_status` | 获取心跳状态 |
-| `get_incoming_messages` | 获取入站消息 |
-
-*注：`auto_discover_projects` 工具已被弃用，信号文件现由后台服务自动监听处理。*
-
-## 配置文件
-
-### 全局配置 (config.yaml)
-
+### 2. Configure Global Settings
+Create `config.yaml`:
 ```yaml
-# MCP 服务器配置
-mcp:
-  transport: "http"  # stdio 或 http
-  port: 8888
-  host: "127.0.0.1"
-
-# 项目配置目录
-projects_dir: "./projects"
-
-# 日志配置
+# Global configuration
 logging:
-  level: "info"
-  file: "./logs/cc-power.log"
+  level: info
 
-# Provider 配置
+mcp:
+  transport: stdio  # Only stdio mode is supported in v2.0
+
 providers:
   feishu:
     enabled: true
   telegram:
-    enabled: false
+    enabled: true
   whatsapp:
-    enabled: false
+    enabled: true
 ```
 
-### 项目配置
+### 3. Start the Service
+```bash
+# Start the CC-Power service (runs in background)
+npx cc-power start
 
-**飞书** (.cc-power.yaml)：
-
-```yaml
-provider: "feishu"
-
-feishu:
-  app_id: "cli_your_app_id_here"
-  app_secret: "your_app_secret_here"
-  bot_name: "Claude Bot"
-
-session:
-  max_history: 50
-  timeout_minutes: 30
+# Or start with stdio mode explicitly (recommended for Claude Code MCP integration)
+npx cc-power start --stdio
 ```
 
-**Telegram** (cc-power.yaml)：
+### 4. Create a Project
+```bash
+# Initialize a new project
+npx cc-power init my-project --provider feishu
 
-```yaml
-provider: "telegram"
-
-telegram:
-  bot_token: "your_bot_token_here"
-
-session:
-  max_history: 50
-  timeout_minutes: 30
+# Edit the project config at projects/my-project/config.yaml with your credentials
 ```
 
-## 开发
+### 5. Run a Project with Tmux Integration
+```bash
+# Use the new run command to start a project in a Tmux session
+npx cc-power run /path/to/your/project
 
-### 构建项目
+# This creates a shared session where both local input and IM messages go to the same Claude instance
+```
+
+## Signal-Based Auto-Registration
+
+The new architecture uses a file system signal approach for project lifecycle management:
+
+1. **Register**: Create `~/.cc-power/signals/register-<project_id>.json` with project configuration
+2. **Unregister**: Create `~/.cc-power/signals/unregister-<project_id>.json` to clean up resources
+3. **Auto-Wakeup**: Dormant projects automatically start when receiving messages
+
+## Tmux Integration
+
+The `cc-power run` command creates shared Tmux sessions:
+- Uses MD5 hash of project path as unique project ID
+- Allows both local user input and remote IM messages to drive the same Claude instance
+- Provides automatic project history tracking for restart capabilities
+
+## Supported Platforms
+
+- **Feishu/Lark**: Full integration with bots and chat groups
+- **Telegram**: Bot-based messaging support
+- **WhatsApp**: Business API integration
+
+## Commands
 
 ```bash
-npm run build
+# Start the service
+npx cc-power start [--stdio]
+
+# Initialize a new project
+npx cc-power init [project-name] --provider [feishu|telegram|whatsapp]
+
+# Run a project with Tmux integration
+npx cc-power run <project_path> [--session <name>] [--dangerously-skip-permissions]
+
+# Validate configuration
+npx cc-power validate [-c config.yaml]
+
+# Show service status
+npx cc-power status [-c config.yaml]
+
+# View message logs
+npx cc-power logs [project-name] [-c 50] [-o readable|json] [-w] [--chat <chatId>]
 ```
 
-### 运行服务
+## Security
+
+- Provider configurations support allowlists for users/chats
+- All connections are validated against global provider settings
+- Project isolation maintained through unique project IDs and routing tables
+- Signal files are automatically cleaned up after processing
+
+## Message Flow
+
+1. **Incoming**: Chat platform → CC-Power HTTP server → Signal/MCP routing → Tmux injection → Claude Code
+2. **Outgoing**: Claude Code MCP tools → CC-Power MCP server → Router → Chat platform response
+
+## Development
 
 ```bash
-# HTTP 模式
-cc-power start
+# Build the project
+cd cc-power && npm run build
 
-# 强制 STDIO 模式
-cc-power start --stdio
+# Run tests
+npm test
 
-# 指定配置文件
-cc-power start -c /path/to/config.yaml
+# Start in development mode
+npx cc-power start --stdio
 ```
-
-### 其他命令
-
-```bash
-# 初始化项目配置
-cc-power init my-project -p feishu
-
-# 验证配置
-cc-power validate
-
-# 查看状态
-cc-power status
-
-# 查看消息日志
-cc-power logs my-project -c 50
-```
-
-## 传输模式对比
-
-| 特性 | STDIO | HTTP/SSE |
-|------|-------|----------|
-| 启动方式 | Claude Code 自动启动 | 手动启动作为后台守护进程 |
-| 配置复杂度 | 简单 | 中等 |
-| 监控面板 | 无 | 有 |
-| 多客户端/多项目 | 否（每个项目独立启动实例） | 是（单服务管理所有项目路由） |
-| 推荐场景 | 简单开发、单项目 | 生产环境、多项目并发、多平台聚合 |
-
-## 故障排查
-
-### MCP 服务器连接失败
-
-1. 确认 CLI 已正确安装：
-   ```bash
-   which cc-power
-   cc-power --version
-   ```
-
-2. 检查 MCP 配置：
-   ```bash
-   /mcp list
-   ```
-
-3. STDIO 模式：确保使用了 `--stdio` 标志
-4. HTTP 模式：确保服务器正在运行
-
-### 查看 MCP 服务器日志
-
-STDIO 模式的日志输出到 Claude Code 的日志中，HTTP 模式的日志在 `./logs/cc-power.log`。
-
-## 许可证
-
-MIT

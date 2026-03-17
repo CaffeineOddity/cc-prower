@@ -48,12 +48,6 @@ export class Router implements IRouter {
   private logger: Logger;
   private messageLogger: MessageLogger;
 
-  // 心跳跟踪
-  private heartbeats = new Map<string, number>(); // projectId → lastHeartbeatTime
-  private heartbeatInterval: NodeJS.Timeout | null = null;
-  private readonly HEARTBEAT_TIMEOUT = 60000; // 60秒无心跳则认为项目已死
-  private readonly HEARTBEAT_CHECK_INTERVAL = 10000; // 每10秒检查一次心跳
-
   // 入站消息队列（用于 HTTP 模式）
   private incomingMessageQueue = new Map<string, IncomingMessage[]>(); // projectId → messages
 
@@ -64,75 +58,6 @@ export class Router implements IRouter {
     this.configManager = configManager;
     this.logger = logger;
     this.messageLogger = messageLogger || new MessageLogger('./logs/messages');
-
-    // 启动心跳检查
-    this.startHeartbeatChecker();
-  }
-
-  /**
-   * 启动心跳检查器
-   */
-  private startHeartbeatChecker(): void {
-    this.heartbeatInterval = setInterval(() => {
-      this.checkDeadProjects();
-    }, this.HEARTBEAT_CHECK_INTERVAL);
-
-    this.logger.debug('Heartbeat checker started');
-  }
-
-  /**
-   * 停止心跳检查器
-   */
-  private stopHeartbeatChecker(): void {
-    if (this.heartbeatInterval) {
-      clearInterval(this.heartbeatInterval);
-      this.heartbeatInterval = null;
-      this.logger.debug('Heartbeat checker stopped');
-    }
-  }
-
-  /**
-   * 检查并清理已死的项目
-   */
-  private checkDeadProjects(): void {
-    const now = Date.now();
-    const deadProjects: string[] = [];
-
-    for (const [projectId, lastHeartbeat] of this.heartbeats) {
-      const timeSinceLast = now - lastHeartbeat;
-      if (timeSinceLast > this.HEARTBEAT_TIMEOUT) {
-        deadProjects.push(projectId);
-      }
-    }
-
-    for (const projectId of deadProjects) {
-      this.logger.warn(
-        `Project ${projectId} heartbeat timeout (${(now - (this.heartbeats.get(projectId) || 0)) / 1000}s), unregistering`
-      );
-      this.unregisterProject(projectId).catch(error => {
-        this.logger.error(`Failed to unregister dead project ${projectId}:`, error);
-      });
-    }
-  }
-
-  /**
-   * 发送心跳
-   */
-  async sendHeartbeat(projectId: string): Promise<void> {
-    const now = Date.now();
-    this.heartbeats.set(projectId, now);
-
-    this.logger.debug(`Heartbeat received from project ${projectId}`);
-  }
-
-  /**
-   * 获取项目心跳状态
-   */
-  getProjectHeartbeatStatus(projectId: string): { lastHeartbeat: number; isAlive: boolean } {
-    const lastHeartbeat = this.heartbeats.get(projectId) || 0;
-    const isAlive = lastHeartbeat > 0 && (Date.now() - lastHeartbeat) < this.HEARTBEAT_TIMEOUT;
-
-    return { lastHeartbeat, isAlive };
   }
 
   /**
@@ -196,9 +121,6 @@ export class Router implements IRouter {
     // 存储 Provider first to indicate the project is registered
     this.providers.set(projectId, providerInstance);
 
-    // 初始化心跳（使用当前时间）
-    this.heartbeats.set(projectId, Date.now());
-
     // 设置消息监听
     providerInstance.onMessage((message: IncomingMessage) => {
       this.handleIncomingMessage(message);
@@ -233,9 +155,6 @@ export class Router implements IRouter {
     // Remove tmux session info
     this.projectTmuxSessions.delete(projectId);
 
-    // 清理心跳数据
-    this.heartbeats.delete(projectId);
-
     // 清理相关路由
     for (const [chatId, route] of this.projectRoutes) {
       if (route.projectId === projectId) {
@@ -251,9 +170,6 @@ export class Router implements IRouter {
    */
   async cleanup(): Promise<void> {
     this.logger.info('Cleaning up router...');
-
-    // 停止心跳检查器
-    this.stopHeartbeatChecker();
 
     // 注销所有项目
     const projectIds = Array.from(this.providers.keys());

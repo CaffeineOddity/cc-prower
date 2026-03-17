@@ -179,11 +179,16 @@ async function startService(options: any) {
     },
 
     async sendHeartbeat(projectId: string): Promise<void> {
-      await router.sendHeartbeat(projectId);
+      // Heartbeat functionality has been removed in favor of Tmux-based session monitoring
+      // The function remains for interface compatibility but does nothing
+      logger.debug(`Heartbeat call for ${projectId} (deprecated)`);
     },
 
     getProjectHeartbeatStatus(projectId: string): { lastHeartbeat: number; isAlive: boolean } {
-      return router.getProjectHeartbeatStatus(projectId);
+      // Heartbeat functionality has been removed in favor of Tmux-based session monitoring
+      // The function returns a default value for interface compatibility
+      logger.debug(`Heartbeat status request for ${projectId} (deprecated)`);
+      return { lastHeartbeat: Date.now(), isAlive: true };
     },
 
     async getIncomingMessages(args: {
