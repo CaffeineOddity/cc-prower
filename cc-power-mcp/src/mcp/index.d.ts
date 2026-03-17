@@ -1,4 +1,3 @@
-import { JSONRPCMessage } from '@modelcontextprotocol/sdk/types.js';
 /**
  * MCP 服务器需要调用的后端服务接口
  */
@@ -45,27 +44,12 @@ export interface BackendService {
     logWarn(message: string, ...args: any[]): void;
     logError(message: string, ...args: any[]): void;
     /**
-     * 发送心跳
-     */
-    sendHeartbeat(projectId: string): Promise<void>;
-    /**
-     * 获取项目心跳状态
-     */
-    getProjectHeartbeatStatus(projectId: string): {
-        lastHeartbeat: number;
-        isAlive: boolean;
-    };
-    /**
      * 获取入站消息
      */
     getIncomingMessages(args: {
         project_id: string;
         since?: number;
     }): Promise<any[]>;
-    /**
-     * 设置通知发送器（用于 HTTP 模式）
-     */
-    setNotificationSender(sender: (message: JSONRPCMessage) => Promise<void>): void;
 }
 /**
  * MCP 服务器配置
@@ -80,12 +64,9 @@ export interface MCPServerConfig {
      */
     version?: string;
     /**
-     * HTTP 传输配置
+     * 传输方式
      */
-    http?: {
-        port?: number;
-        host?: string;
-    };
+    transport?: 'stdio';
 }
 /**
  * MCP 服务器
@@ -95,9 +76,6 @@ export declare class MCPServer {
     private server;
     private backend;
     private tools;
-    private transport;
-    private expressApp;
-    private expressServer;
     private config?;
     constructor(backend: BackendService, config?: MCPServerConfig);
     /**
@@ -105,15 +83,7 @@ export declare class MCPServer {
      */
     private defineTools;
     /**
-     * 获取信号目录
-     */
-    private getSignalsDir;
-    /**
-     * 处理信号文件
-     */
-    private processSignalFiles;
-    /**
-     * 设置处理器
+     * 处理工具调用
      */
     private setupHandlers;
     /**
@@ -137,58 +107,13 @@ export declare class MCPServer {
      */
     private unregisterProject;
     /**
-     * 处理 send_heartbeat 工具
-     */
-    private sendHeartbeat;
-    /**
-     * 处理 get_heartbeat_status 工具
-     */
-    private getHeartbeatStatus;
-    /**
      * 处理 get_incoming_messages 工具
      */
     private getIncomingMessages;
     /**
-     * 处理 auto_discover_projects 工具
-     */
-    private autoDiscoverProjects;
-    /**
      * 启动服务器（stdio 模式）
      */
     startStdio(): Promise<void>;
-    /**
-     * 重置 MCP Server 和处理器
-     * 用于在新的客户端连接时（如 Claude Code 重启）清除已初始化的状态，防止抛出 Server already initialized 错误。
-     */
-    private resetServer;
-    /**
-     * 启动服务器（HTTP/SSE 模式）
-     */
-    startHTTP(port?: number, host?: string): Promise<void>;
-    /**
-     * 清理占用指定端口的进程
-     */
-    private cleanupPort;
-    /**
-     * 获取完整状态信息
-     */
-    private getFullStatus;
-    /**
-     * 格式化时间间隔
-     */
-    private formatTimeSinceLast;
-    /**
-     * 格式化运行时间
-     */
-    private formatUptime;
-    /**
-     * 设置监控页面
-     */
-    private setupMonitoringPage;
-    /**
-     * 获取监控页面 HTML
-     */
-    private getMonitoringHTML;
     /**
      * 停止服务器
      */

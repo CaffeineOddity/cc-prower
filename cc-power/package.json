@@ -6,7 +6,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && chmod +x dist/cli.js",
     "dev": "tsx cli.ts start",
     "start": "node dist/cli.js start",
     "cli": "tsx cli.ts",
@@ -26,12 +26,13 @@
     "cc-power": "./dist/cli.js"
   },
   "dependencies": {
-    "node-telegram-bot-api": "^0.66.0",
-    "eventemitter3": "^5.0.1",
-    "yaml": "^2.6.1",
+    "cc-power-mcp": "workspace:*",
+    "chokidar": "^5.0.0",
     "commander": "^13.0.0",
+    "eventemitter3": "^5.0.1",
+    "node-telegram-bot-api": "^0.66.0",
     "ws": "^8.18.0",
-    "cc-power-mcp": "workspace:*"
+    "yaml": "^2.6.1"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

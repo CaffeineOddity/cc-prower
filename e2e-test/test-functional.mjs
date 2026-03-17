@@ -88,11 +88,9 @@ const TEST_CASES = [
   {
     id: 'TC-010',
     name: 'Auto-Discover Projects',
-    description: 'Test auto_discover_projects MCP tool',
+    description: 'Test file watcher auto discovering projects',
     expectedLogs: [
-      'Auto-discovering projects',
-      'Auto-registered project:',
-      'Auto-discovery complete'
+      'Auto-registered project:'
     ]
   },
   {

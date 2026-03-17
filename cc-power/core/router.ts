@@ -8,6 +8,9 @@ import type {
   IProvider,
 } from '../types/index.js';
 
+import * as fs from 'fs/promises';
+import * as path from 'path';
+
 // MCP 相关类型（本地定义，因为这些是 MCP 特定的）
 interface SendMessageArgs {
   provider: string;
@@ -40,6 +43,7 @@ import { MessageLogger, type MessageLogEntry } from './message-logger.js';
 export class Router implements IRouter {
   private providers = new Map<string, IProvider>(); // projectId → Provider
   private projectRoutes = new Map<string, MessageRoute>(); // chatId → MessageRoute
+  private projectTmuxSessions = new Map<string, string>(); // projectId → tmuxPane
   private configManager: ConfigManager;
   private logger: Logger;
   private messageLogger: MessageLogger;
@@ -169,40 +173,46 @@ export class Router implements IRouter {
 
     this.logger.info(`Registering project: ${projectId} (${providerType})`);
 
+    // 动态导入 Provider
+    const ProviderModule = await this.loadProvider(providerType);
+    const providerInstance = new ProviderModule() as IProvider;
+
+    // 缓存项目配置
+    this.configManager.cacheProjectConfig(projectId, config);
+
+    // Store tmux session info if provided
+    if (config.tmuxPane) {
+      this.projectTmuxSessions.set(projectId, config.tmuxPane);
+      this.logger.debug(`Stored tmux session for project ${projectId}: ${config.tmuxPane}`);
+    }
+
+    // 构建 ProviderConfig
+    const providerConfig: ProviderConfig = {
+      type: providerType,
+      projectId,
+      ...config,
+    };
+
+    // 存储 Provider first to indicate the project is registered
+    this.providers.set(projectId, providerInstance);
+
+    // 初始化心跳（使用当前时间）
+    this.heartbeats.set(projectId, Date.now());
+
+    // 设置消息监听
+    providerInstance.onMessage((message: IncomingMessage) => {
+      this.handleIncomingMessage(message);
+    });
+
+    // Try to connect to the provider but don't let connection errors prevent registration
     try {
-      // 动态导入 Provider
-      const ProviderModule = await this.loadProvider(providerType);
-      const providerInstance = new ProviderModule() as IProvider;
-
-      // 缓存项目配置
-      this.configManager.cacheProjectConfig(projectId, config);
-
-      // 构建 ProviderConfig
-      const providerConfig: ProviderConfig = {
-        type: providerType,
-        projectId,
-        ...config,
-      };
-
-      // 连接 Provider
       await providerInstance.connect(providerConfig);
-
-      // 存储 Provider
-      this.providers.set(projectId, providerInstance);
-
-      // 初始化心跳（使用当前时间）
-      this.heartbeats.set(projectId, Date.now());
-
-      // 设置消息监听
-      providerInstance.onMessage((message: IncomingMessage) => {
-        this.handleIncomingMessage(message);
-      });
-
       this.logger.info(`Project ${projectId} registered successfully`);
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      this.logger.error(`Failed to register project ${projectId}: ${errorMessage}`);
-      // Don't throw, just log the error so other projects can register
+    } catch (connectionError) {
+      const errorMessage = connectionError instanceof Error ? connectionError.message : String(connectionError);
+      this.logger.error(`Failed to connect to provider for project ${projectId}: ${errorMessage}`);
+      // Still consider the registration successful but with failed connection
+      // This allows the project to be tracked even with connection issues
     }
   }
 
@@ -219,6 +229,9 @@ export class Router implements IRouter {
 
     await provider.disconnect();
     this.providers.delete(projectId);
+
+    // Remove tmux session info
+    this.projectTmuxSessions.delete(projectId);
 
     // 清理心跳数据
     this.heartbeats.delete(projectId);
@@ -294,6 +307,16 @@ export class Router implements IRouter {
     queue.push(message);
     this.incomingMessageQueue.set(message.projectId, queue);
 
+    // Check if project is registered; if not, trigger auto-wakeup
+    this.attemptAutoWakeup(message).catch(err => {
+      this.logger.error(`Failed to auto-wakeup project ${message.projectId}:`, err);
+    });
+
+    // 基于 Tmux 的输入注入
+    this.injectMessageViaTmux(message).catch(err => {
+      this.logger.error(`Failed to inject message via Tmux for project ${message.projectId}:`, err);
+    });
+
     // 如果有通知发送器，立即推送通知
     if (this.notificationSender) {
       this.sendIncomingMessageNotification(message).catch(error => {
@@ -302,6 +325,39 @@ export class Router implements IRouter {
     }
 
     this.logger.info(`Incoming message queued for ${message.projectId}: ${message.content}`);
+  }
+
+  /**
+   * 基于 Tmux 的输入注入，反向驱动 Claude Code
+   */
+  private async injectMessageViaTmux(message: IncomingMessage): Promise<void> {
+    const tmuxPane = this.projectTmuxSessions.get(message.projectId);
+    if (!tmuxPane) {
+      this.logger.warn(`No tmux session found for project ${message.projectId}`);
+      return;
+    }
+
+    const content = message.content;
+
+    // 构建注入的 prompt。告诉 Claude Code 处理新消息并调用 send_message 回传结果
+    // 根据 TODO 第3节要求，添加系统级指令强制闭环
+    const prompt = `[来自 ${message.provider} 的新消息] 用户: ${message.userName || message.userId} 内容: ${content}\n请处理此消息，并在完成后务必调用 send_message 工具将结果发回给 chat_id: ${message.chatId}。`;
+
+    this.logger.info(`Injecting message to tmux pane ${tmuxPane} for project ${message.projectId}`);
+
+    const { exec } = await import('child_process');
+    const { promisify } = await import('util');
+    const execAsync = promisify(exec);
+
+    try {
+      // 使用 tmux send-keys 注入文本并模拟按下回车
+      // 对于长文本，使用单引号包裹 prompt 并进行适当转义
+      const escapedPrompt = prompt.replace(/'/g, "'\\''");
+      await execAsync(`tmux send-keys -t ${tmuxPane} '${escapedPrompt}' Enter`);
+      this.logger.info(`Successfully injected message to tmux pane ${tmuxPane}`);
+    } catch (error) {
+      this.logger.error(`Tmux injection failed for pane ${tmuxPane}:`, error);
+    }
   }
 
   /**
@@ -467,9 +523,13 @@ export class Router implements IRouter {
         continue;
       }
 
+      // 获取当前项目在队列中的待处理消息数
+      const queue = this.incomingMessageQueue.get(projectId) || [];
+
       status[projectId] = {
         provider: provName,
         healthy: prov.isHealthy(),
+        pendingMessages: queue.length,
       };
     }
 
@@ -614,38 +674,78 @@ export class Router implements IRouter {
 
 
   /**
-   * 列出聊天（BackendService 接口实现）
+   * 尝试自动唤醒项目（当收到未注册项目的消息时）
    */
-  async listChats(args: {
-    provider: string;
-    project_id?: string;
-  }): Promise<any> {
-    return await this.handleListChats(args);
+  private async attemptAutoWakeup(message: IncomingMessage): Promise<boolean> {
+    // 检查项目是否已注册
+    const isRegistered = this.providers.has(message.projectId);
+    if (isRegistered) {
+      return true; // 项目已注册，无需唤醒
+    }
+
+    this.logger.info(`Attempting to auto-wake up unregistered project: ${message.projectId}`);
+
+    try {
+      // 读取项目历史记录
+      const projectHistory = await this.readProjectHistory();
+      const projectRecord = projectHistory[message.projectId];
+
+      if (!projectRecord) {
+        this.logger.warn(`No project history found for project ID: ${message.projectId}`);
+        return false;
+      }
+
+      // 启动项目
+      const success = await this.wakeUpProject(message.projectId, projectRecord);
+      if (success) {
+        this.logger.info(`Successfully auto-waked up project: ${message.projectId}`);
+        return true;
+      } else {
+        this.logger.error(`Failed to auto-wake up project: ${message.projectId}`);
+        return false;
+      }
+    } catch (error) {
+      this.logger.error(`Error during auto-wake up for project ${message.projectId}:`, error);
+      return false;
+    }
   }
 
   /**
-   * 获取状态（BackendService 接口实现）
+   * 读取项目历史记录
    */
-  async getStatus(args: { provider?: string }): Promise<any> {
-    return await this.handleGetStatus(args);
+  private async readProjectHistory(): Promise<any> {
+    const cacheDir = path.join(process.env.HOME || '', '.cc-power', 'cache');
+    const historyPath = path.join(cacheDir, 'project_history.json');
+
+    try {
+      const content = await fs.readFile(historyPath, 'utf-8');
+      return JSON.parse(content);
+    } catch (error) {
+      this.logger.warn(`Could not read project history from ${historyPath}:`, error);
+      return {};
+    }
   }
 
   /**
-   * 日志记录（BackendService 接口实现）
+   * 唤醒项目
    */
-  logDebug(message: string, ...args: any[]): void {
-    this.logger.debug(message, ...args);
-  }
+  private async wakeUpProject(projectId: string, projectRecord: any): Promise<boolean> {
+    try {
+      // 在后台执行 cc-power run 命令
+      const { spawn } = await import('child_process');
 
-  logInfo(message: string, ...args: any[]): void {
-    this.logger.info(message, ...args);
-  }
+      // 使用 spawn 来异步启动项目而不阻塞当前调用
+      const runProcess = spawn('npx', ['cc-power', 'run', projectRecord.projectPath, '--session', projectRecord.sessionName], {
+        detached: true,  // 分离进程，使其独立运行
+        stdio: 'ignore'  // 忽略输入输出，不干扰当前进程
+      });
 
-  logWarn(message: string, ...args: any[]): void {
-    this.logger.warn(message, ...args);
-  }
-
-  logError(message: string, ...args: any[]): void {
-    this.logger.error(message, ...args);
+      // 不等待子进程结束，立即返回成功
+      runProcess.unref(); // 使父进程不必等待子进程
+      return true;
+    } catch (error) {
+      this.logger.error(`Failed to wake up project ${projectId}:`, error);
+      return false;
+    }
   }
 }

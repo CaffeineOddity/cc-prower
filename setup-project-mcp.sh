@@ -170,16 +170,16 @@ setup_claude_code_hooks() {
         hooks_dir="$claude_dir/hooks"
         mkdir -p "$hooks_dir"
 
-        if [ -f "$hooks_source_dir/session-start.mjs" ]; then
-            cp "$hooks_source_dir/session-start.mjs" "$hooks_dir/"
-            chmod +x "$hooks_dir/session-start.mjs"
-            print_success "已复制 session-start.mjs"
+        if [ -f "$hooks_source_dir/session-start.py" ]; then
+            cp "$hooks_source_dir/session-start.py" "$hooks_dir/"
+            chmod +x "$hooks_dir/session-start.py"
+            print_success "已复制 session-start.py"
         fi
 
-        if [ -f "$hooks_source_dir/session-end.mjs" ]; then
-            cp "$hooks_source_dir/session-end.mjs" "$hooks_dir/"
-            chmod +x "$hooks_dir/session-end.mjs"
-            print_success "已复制 session-end.mjs"
+        if [ -f "$hooks_source_dir/session-end.py" ]; then
+            cp "$hooks_source_dir/session-end.py" "$hooks_dir/"
+            chmod +x "$hooks_dir/session-end.py"
+            print_success "已复制 session-end.py"
         fi
 
         if [ -f "$hooks_source_dir/settings.json" ]; then
@@ -241,8 +241,8 @@ ensure_cli_installed() {
     if ! command -v "$cli_name" &> /dev/null; then
         print_error "${cli_name} 未安装"
         echo ""
-        echo "请先在 cc-prower 根目录运行:"
-        echo "  cd /path/to/cc-prower"
+        echo "请先在项目根目录运行:"
+        echo "  cd /path/to/project-root"
         echo "  ./setup.sh"
         exit 1
     fi
@@ -250,7 +250,7 @@ ensure_cli_installed() {
 
 ensure_repo_built() {
     if [ ! -f "$SCRIPT_DIR/package.json" ]; then
-        print_warning "未找到 cc-prower 根目录 package.json，跳过构建"
+        print_warning "未找到项目根目录 package.json，跳过构建"
         return 0
     fi
 

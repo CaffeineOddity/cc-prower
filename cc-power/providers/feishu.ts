@@ -94,6 +94,14 @@ export class FeishuProvider extends BaseProvider {
 
       const data = (await response.json()) as any;
 
+      if (data.code === 99991668 || data.code === 99991663 || data.code === 99991664) {
+        // Token expired, re-authenticate
+        console.log('Feishu token expired, re-authenticating...');
+        const feishuConfig = this.config as FeishuConfig;
+        await this.authenticate(feishuConfig.app_id, feishuConfig.app_secret);
+        return;
+      }
+
       if (data.code === 0 && data.data?.items) {
         for (const item of data.data.items) {
           // Process only text messages

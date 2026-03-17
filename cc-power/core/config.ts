@@ -86,4 +86,11 @@ export class ConfigManager implements IConfigManager {
   clearCache(): void {
     this.projectsCache.clear();
   }
+
+  /**
+   * 移除缓存的项目配置
+   */
+  removeCachedProjectConfig(projectId: string): void {
+    this.projectsCache.delete(projectId);
+  }
 }

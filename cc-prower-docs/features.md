@@ -886,14 +886,31 @@ pm2 install pm2-logrotate
 
 ### 6.3 Claude Code 配置
 
-在 `~/.claude/settings.json` 中添加：
+**推荐：HTTP/SSE 模式（支持多项目和守护进程）**
+
+使用命令直接添加（会自动写入 `.claude/mcp.json`）：
+`claude mcp add --transport http cc-power-mcp http://127.0.0.1:8888/mcp`
+
+或者在 `.claude/mcp.json` 中手动配置：
+
+```json
+{
+  "mcpServers": {
+    "cc-power-mcp": {
+      "url": "http://127.0.0.1:8888/mcp"
+    }
+  }
+}
+```
+
+**备选：STDIO 模式（单项目开发调试）**
 
 ```json
 {
   "mcpServers": {
     "cc-power": {
-      "command": "node",
-      "args": ["/path/to/cc-power-mcp/dist/index.js"]
+      "command": "cc-power",
+      "args": ["start", "--stdio"]
     }
   }
 }

@@ -17,32 +17,32 @@ NC='\033[0m' # No Color
 
 # 打印信息辅助函数
 # 打印普通信息
-print_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
+print_info() { printf "%b%s%b %s\n" "$BLUE" "[INFO]" "$NC" "$1"; }
 # 打印成功信息
-print_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
+print_success() { printf "%b%s%b %s\n" "$GREEN" "[SUCCESS]" "$NC" "$1"; }
 # 打印警告信息
-print_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
+print_warning() { printf "%b%s%b %s\n" "$YELLOW" "[WARNING]" "$NC" "$1"; }
 # 打印错误信息
-print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+print_error() { printf "%b%s%b %s\n" "$RED" "[ERROR]" "$NC" "$1"; }
 
 # 显示使用说明
 # 打印脚本的用法和功能介绍
 show_usage() {
     echo "用法: ./setup.sh"
     echo ""
-    echo "此脚本在 cc-prower 目录运行，用于:"
+    echo "此脚本在项目根目录运行，用于:"
     echo "  - 构建 ${CLI_NAME}"
     echo "  - 全局安装 ${CLI_NAME}"
     echo ""
 }
 
 # 检查运行目录是否正确
-# 确保脚本在 cc-prower 根目录执行，否则退出并提示错误
+# 确保脚本在项目根目录执行，否则退出并提示错误
 check_directory() {
     local current_dir
     current_dir=$(pwd)
-    if [ "$(basename "$current_dir")" != "cc-prower" ]; then
-        print_error "请在 cc-prower 根目录运行此脚本"
+    if [ ! -f "pnpm-workspace.yaml" ] || [ ! -d "cc-power" ] || [ ! -d "cc-power-mcp" ]; then
+        print_error "请在项目根目录运行此脚本（需包含 pnpm-workspace.yaml 等文件）"
         echo "当前目录: $current_dir"
         show_usage
         exit 1
@@ -50,10 +50,12 @@ check_directory() {
 }
 
 # 构建项目
-# 执行 pnpm run build 进行项目构建，隐藏输出
+# 安装依赖并执行 pnpm run build 进行项目构建
 build_project() {
+    print_info "正在安装依赖..."
+    pnpm install
     print_info "正在构建..."
-    pnpm run build > /dev/null 2>&1
+    pnpm run build
     print_success "构建完成"
 }
 
@@ -61,8 +63,8 @@ build_project() {
 # 进入对应子目录执行 npm link 操作
 install_global() {
     print_info "正在全局安装 ${CLI_NAME}..."
-    cd cc-power-mcp && npm link > /dev/null 2>&1 && cd ..
-    cd cc-power && npm link cc-power-mcp > /dev/null 2>&1 && npm link > /dev/null 2>&1 && cd ..
+    cd cc-power-mcp && npm link && cd ..
+    cd cc-power && npm link cc-power-mcp && npm link && cd ..
 }
 
 # 验证安装结果

@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { spawn, execSync } from 'child_process';
 import { Command } from 'commander';
 import { ConfigManager } from './core/config.js';
 import { Logger } from './core/logger.js';
 import { Router } from './core/router.js';
 import { MessageLogger } from './core/message-logger.js';
 import { MCPServer } from 'cc-power-mcp';
+import chokidar from 'chokidar';
 
 const CLI_NAME = 'cc-power';
 const CLI_VERSION = '1.0.0';
@@ -43,6 +45,16 @@ program
   .option('-c, --config <path>', 'Path to config file', './config.yaml')
   .action(async (options) => {
     await validateConfig(options);
+  });
+
+program
+  .command('run')
+  .description('Run a project in a managed tmux session with Claude Code')
+  .argument('<path>', 'Path to project directory')
+  .option('-s, --session <name>', 'Custom tmux session name')
+  .option('--dangerously-skip-permissions', 'Skip permission checks (dangerous)')
+  .action(async (projectPath, options) => {
+    await runProject(projectPath, options);
   });
 
 program
@@ -186,29 +198,37 @@ async function startService(options: any) {
     },
   };
 
+  // 设置信号目录路径
+  const signalsDir = path.join(process.env.HOME || '', '.cc-power', 'signals');
+  await fs.mkdir(signalsDir, { recursive: true });
+
+  // 创建文件监听器，监听信号文件
+  const watcher = chokidar.watch(signalsDir, {
+    ignored: /^\./, // 忽略隐藏文件
+    persistent: true,
+  });
+
+  watcher.on('add', async (filePath) => {
+    if (filePath.endsWith('.json')) {
+      await processSignalFile(filePath, backend, logger);
+    }
+  });
+
   // 创建 MCP 服务器
   const mcpServer = new MCPServer(backend, {
     name: CLI_NAME,
     version: CLI_VERSION,
-    http: transportMode === 'http' ? {
-      port: globalConfig.mcp.port || 8080,
-      host: '127.0.0.1',
-    } : undefined,
   });
 
   // 根据传输方式启动
   if (transportMode === 'http') {
-    console.log(`${CLI_NAME} is ready. Listening on port ${globalConfig.mcp.port || 8080}.`);
-    console.log('Projects will be registered when clients connect via MCP.');
-    console.log('Press Ctrl+C to stop the server.\n');
-
-    await mcpServer.startHTTP(globalConfig.mcp.port || 8080);
-  } else {
-    console.log(`${CLI_NAME} is ready. Projects will be registered when clients connect via MCP.`);
-    console.log('Press Ctrl+C to stop the server.\n');
-
-    await mcpServer.startStdio();
+    console.log(`${CLI_NAME} does not support HTTP mode anymore. Using stdio mode.`);
   }
+
+  console.log(`${CLI_NAME} is ready. Projects will be registered when clients connect via MCP.`);
+  console.log('Press Ctrl+C to stop the server.\n');
+
+  await mcpServer.startStdio();
 
   // 优雅关闭
   const shutdown = async () => {
@@ -224,6 +244,14 @@ async function startService(options: any) {
 
   process.on('SIGTERM', shutdown);
   process.on('SIGINT', shutdown);
+
+  process.on('uncaughtException', (err) => {
+    logger.error('Uncaught Exception:', err);
+  });
+
+  process.on('unhandledRejection', (reason, promise) => {
+    logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
+  });
 
   logger.info(`${CLI_NAME} started successfully`);
 }
@@ -360,6 +388,175 @@ async function showStatus(options: any) {
 }
 
 /**
+ * 运行项目 (Tmux 模式)
+ */
+async function runProject(projectPath: string, options: any) {
+  const { session, dangerouslySkipPermissions } = options;
+  const absProjectPath = path.resolve(projectPath);
+  const projectName = path.basename(absProjectPath);
+
+  // 生成项目ID（使用项目绝对路径的MD5哈希前8位）
+  const crypto = await import('crypto');
+  const projectId = crypto.createHash('md5').update(absProjectPath).digest('hex').substring(0, 8);
+
+  const sessionName = session || `cc-p-${projectId}`;
+  const configManager = new ConfigManager();
+
+  // 检查是否安装了 tmux
+  try {
+    execSync('tmux -V', { stdio: 'ignore' });
+  } catch (error) {
+    console.error('Error: tmux is not installed. Please install tmux to use this command.');
+    process.exit(1);
+  }
+
+  // 尝试加载项目配置
+  const configPaths = [
+    path.join(absProjectPath, '.cc-power.yaml'),
+    path.join(absProjectPath, 'config.yaml'),
+  ];
+
+  let projectConfig: any = null;
+  for (const candidate of configPaths) {
+    try {
+      const content = await fs.readFile(candidate, 'utf-8');
+      const yaml = await import('yaml');
+      projectConfig = yaml.parse(content);
+      break;
+    } catch (error) {
+      continue;
+    }
+  }
+
+  if (!projectConfig) {
+    console.warn(`Warning: No .cc-power.yaml found in ${absProjectPath}. Using default settings.`);
+  }
+
+  console.log(`Running project ${projectName} (ID: ${projectId}) in tmux session: ${sessionName}`);
+
+  // 检查 session 是否存在
+  let sessionExists = false;
+  try {
+    execSync(`tmux has-session -t ${sessionName}`, { stdio: 'ignore' });
+    sessionExists = true;
+  } catch (error) {
+    sessionExists = false;
+  }
+
+  if (sessionExists) {
+    console.log(`Attaching to existing session: ${sessionName}`);
+  } else {
+    console.log(`Creating new session: ${sessionName}`);
+
+    // 构建 claude 命令
+    let claudeCmd = 'claude';
+    if (dangerouslySkipPermissions) {
+      claudeCmd += ' --dangerously-skip-permissions';
+    }
+
+    // 启动新 session，并进入项目目录运行 claude
+    // 使用 -d 后台启动
+    const cmd = `tmux new-session -d -s ${sessionName} -c ${absProjectPath} '${claudeCmd}'`;
+    execSync(cmd);
+
+    // 生成注册信号
+    await generateRegisterSignal(projectId, sessionName, absProjectPath, projectConfig);
+
+    // 记录项目历史
+    await recordProjectHistory(projectId, absProjectPath, projectConfig, sessionName);
+  }
+
+  // Attach 到 session
+  // 使用 spawn 继承 stdio，这样用户可以直接交互
+  const attach = spawn('tmux', ['attach', '-t', sessionName], {
+    stdio: 'inherit',
+    shell: true
+  });
+
+  attach.on('close', async (code: number | null) => {
+    if (code !== 0) {
+      console.log(`Tmux session detached with code ${code}`);
+    }
+
+    // 退出时生成注销信号
+    await generateUnregisterSignal(projectId);
+  });
+}
+
+/**
+ * 生成注册信号文件
+ */
+async function generateRegisterSignal(projectId: string, tmuxSession: string, projectDir: string, projectConfig?: any) {
+  const signalsDir = path.join(process.env.HOME || '', '.cc-power', 'signals');
+  await fs.mkdir(signalsDir, { recursive: true });
+
+  const signalPath = path.join(signalsDir, `register-${projectId}.json`);
+
+  const signal = {
+    type: 'register',
+    projectId,
+    tmuxPane: `${tmuxSession}:0`, // 默认第一个窗口
+    timestamp: Date.now(),
+    projectDirectory: projectDir,
+    provider: projectConfig?.provider || 'unknown',
+    config: projectConfig || {},
+    // 其他配置由后台服务从项目目录加载或在此处解析补充
+  };
+
+  await fs.writeFile(signalPath, JSON.stringify(signal, null, 2));
+  console.log(`Signal sent: Project ${projectId} registered with session ${tmuxSession}`);
+}
+
+/**
+ * 生成注销信号文件
+ */
+async function generateUnregisterSignal(projectId: string) {
+  const signalsDir = path.join(process.env.HOME || '', '.cc-power', 'signals');
+  await fs.mkdir(signalsDir, { recursive: true });
+
+  const signalPath = path.join(signalsDir, `unregister-${projectId}.json`);
+
+  const signal = {
+    type: 'unregister',
+    projectId,
+    timestamp: Date.now(),
+  };
+
+  await fs.writeFile(signalPath, JSON.stringify(signal, null, 2));
+  console.log(`Signal sent: Project ${projectId} unregistered`);
+}
+
+/**
+ * 记录项目历史
+ */
+async function recordProjectHistory(projectId: string, projectPath: string, config: any, sessionName: string) {
+  const cacheDir = path.join(process.env.HOME || '', '.cc-power', 'cache');
+  await fs.mkdir(cacheDir, { recursive: true });
+
+  const historyPath = path.join(cacheDir, 'project_history.json');
+
+  let history: any = {};
+  try {
+    const content = await fs.readFile(historyPath, 'utf-8');
+    history = JSON.parse(content);
+  } catch (error) {
+    // 文件不存在或格式错误，使用空对象
+  }
+
+  history[projectId] = {
+    projectId,
+    projectPath,
+    config,
+    sessionName,
+    createdAt: Date.now(),
+    lastUsed: Date.now(),
+  };
+
+  await fs.writeFile(historyPath, JSON.stringify(history, null, 2));
+  console.log(`Project history recorded for ${projectId}`);
+}
+
+/**
  * 显示消息日志
  */
 async function showLogs(project: string | undefined, options: any) {
@@ -431,5 +628,72 @@ async function showLogs(project: string | undefined, options: any) {
       const readable = await messageLogger.exportToReadable(project);
       console.log(readable);
     }
+  }
+}
+
+/**
+ * 处理信号文件
+ */
+async function processSignalFile(filePath: string, backend: any, logger: any): Promise<void> {
+  try {
+    const fileName = path.basename(filePath);
+    const fileContent = await fs.readFile(filePath, 'utf-8');
+    const signal = JSON.parse(fileContent);
+
+    logger.info(`Processing signal file: ${fileName}`, signal);
+
+    if (fileName.startsWith('register-') && fileName.endsWith('.json')) {
+      // 从信号中获取项目目录
+      const projectDir = signal.projectDirectory;
+      if (!projectDir) {
+        logger.error(`No projectDirectory found in register signal: ${fileName}`);
+        return;
+      }
+
+      // 从项目目录加载 .cc-power.yaml 配置文件
+      const configFile = path.join(projectDir, '.cc-power.yaml');
+      let projectConfig: any;
+
+      try {
+        const configContent = await fs.readFile(configFile, 'utf-8');
+        const yaml = await import('yaml');
+        projectConfig = yaml.parse(configContent);
+      } catch (error) {
+        logger.error(`Failed to load project config from ${configFile}:`, error);
+        return;
+      }
+
+      // 从信号和项目配置构建完整的项目配置
+      const projectId = signal.projectId || path.basename(projectDir);
+      const finalConfig = {
+        ...projectConfig,
+        tmuxPane: signal.tmuxPane, // 从信号文件获取 tmux pane 信息
+      };
+
+      // 调用注册方法
+      await backend.registerProject(projectId, finalConfig);
+      logger.info(`Successfully registered project: ${projectId} from signal`);
+
+      // 处理完成后删除信号文件
+      await fs.unlink(filePath);
+      logger.debug(`Deleted processed signal file: ${filePath}`);
+    } else if (fileName.startsWith('unregister-') && fileName.endsWith('.json')) {
+      // 处理注销信号
+      const projectId = signal.projectId;
+      if (!projectId) {
+        logger.error(`No projectId found in unregister signal: ${fileName}`);
+        return;
+      }
+
+      // 调用注销方法
+      await backend.unregisterProject(projectId);
+      logger.info(`Successfully unregistered project: ${projectId} from signal`);
+
+      // 处理完成后删除信号文件
+      await fs.unlink(filePath);
+      logger.debug(`Deleted processed signal file: ${filePath}`);
+    }
+  } catch (error) {
+    logger.error(`Failed to process signal file ${filePath}:`, error);
   }
 }

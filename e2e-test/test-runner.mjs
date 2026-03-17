@@ -179,7 +179,7 @@ async function main() {
   console.log('  - send_heartbeat: Send heartbeat to keep project alive');
   console.log('  - get_heartbeat_status: Check project heartbeat status');
   console.log('  - get_incoming_messages: Retrieve queued messages');
-  console.log('  - auto_discover_projects: Process signal files');
+  console.log('  - test-auto-discovery.mjs: Test signal file auto-processing');
   console.log('  - unregister_project: Unregister and disconnect project');
   console.log('========================================');
 

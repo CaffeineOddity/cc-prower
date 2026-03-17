@@ -15,7 +15,7 @@
 ### 1. 构建和全局安装
 
 ```bash
-# 在 cc-prower 根目录运行
+# 在项目根目录运行
 ./setup.sh
 ```
 
@@ -54,7 +54,7 @@ Claude Code 会自动启动 MCP 服务器，无需额外操作。
 1. **启动 HTTP 服务器**（在一个新终端）：
 
 ```bash
-cd /path/to/cc-prower
+cd /path/to/project-root
 cc-power start
 ```
 
@@ -83,7 +83,8 @@ claude
 | `send_heartbeat` | 发送心跳保持连接 |
 | `get_heartbeat_status` | 获取心跳状态 |
 | `get_incoming_messages` | 获取入站消息 |
-| `auto_discover_projects` | 自动发现项目 |
+
+*注：`auto_discover_projects` 工具已被弃用，信号文件现由后台服务自动监听处理。*
 
 ## 配置文件
 
@@ -185,11 +186,11 @@ cc-power logs my-project -c 50
 
 | 特性 | STDIO | HTTP/SSE |
 |------|-------|----------|
-| 启动方式 | Claude Code 自动启动 | 手动启动服务器 |
+| 启动方式 | Claude Code 自动启动 | 手动启动作为后台守护进程 |
 | 配置复杂度 | 简单 | 中等 |
 | 监控面板 | 无 | 有 |
-| 多客户端 | 否 | 是 |
-| 推荐场景 | 开发、单用户 | 生产、多用户 |
+| 多客户端/多项目 | 否（每个项目独立启动实例） | 是（单服务管理所有项目路由） |
+| 推荐场景 | 简单开发、单项目 | 生产环境、多项目并发、多平台聚合 |
 
 ## 故障排查
 

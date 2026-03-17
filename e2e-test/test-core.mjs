@@ -231,7 +231,7 @@ async function testTC010(logger, router) {
     if (signalExists) {
       console.log('✅ PASS - Signal file exists and will be processed');
       console.log(`  Signal file: ${signalFile}`);
-      console.log('  Note: Signal processing requires MCP auto_discover_projects tool call');
+      console.log('  Note: Signal processing is automatic via file watcher');
       return true;
     } else {
       console.log('⚠️ SKIP - No signal file found');
