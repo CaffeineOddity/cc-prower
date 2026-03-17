@@ -7,34 +7,27 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-// 定义 hook 事件类型 (JSDoc 代替 TypeScript interface)
-/**
- * @typedef {Object} SessionEndEvent
- * @property {'SessionEnd'} type
- * @property {string} sessionId
- * @property {Object} sessionContext
- * @property {string} sessionContext.projectDirectory
- */
+// 定义 hook 事件类型
+interface SessionEndEvent {
+  type: 'SessionEnd';
+  sessionId: string;
+  sessionContext: {
+    projectDirectory: string;
+  };
+}
 
-/**
- * 主函数，处理 SessionEnd hook 事件
- * 读取标准输入，解析项目路径，并生成对应的取消注册信号文件
- * @returns {Promise<void>}
- */
+// 信号目录
+const SIGNALS_DIR = path.join(process.env.HOME || '', '.cc-power', 'signals');
+
+// 主函数
 async function main() {
   // 读取输入
-  let input = '';
-  try {
-    input = fs.readFileSync(0, 'utf-8'); // 读取 stdin
-  } catch (err) {
-    // 忽略错误
-  }
-
+  const input = process.stdin.read();
   if (!input) {
     process.exit(0);
   }
 
-  let event;
+  let event: SessionEndEvent;
   try {
     event = JSON.parse(input.toString());
   } catch (error) {
@@ -47,9 +40,6 @@ async function main() {
 
   const projectDir = event.sessionContext.projectDirectory;
   const projectId = path.basename(projectDir);
-
-  // 信号目录 (使用全局路径以适配 MCP 的自动发现机制)
-  const SIGNALS_DIR = path.join(process.env.HOME || '', '.cc-power', 'signals');
 
   // 创建信号目录
   fs.mkdirSync(SIGNALS_DIR, { recursive: true });
@@ -67,7 +57,7 @@ async function main() {
   fs.writeFileSync(signalPath, JSON.stringify(signal, null, 2));
 
   console.error(`Project ${projectId} unregister signal written to ${signalPath}`);
-  console.error(`Use 'cc-power-mcp' MCP tool 'unregister_project' to unregister: { project_id: "${projectId}" }`);
+  console.error(`Use MCP tool 'unregister_project' to unregister: { project_id: "${projectId}" }`);
 }
 
 // 运行主函数

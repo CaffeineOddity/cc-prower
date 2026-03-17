@@ -1,0 +1,26 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "cc-power-mcp-session-start",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/session-start.mjs"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "cc-power-mcp-session-end",
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/session-end.mjs"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -501,7 +501,7 @@ export class MCPServer {
         this.expressApp = createMcpExpressApp();
         // Create StreamableHTTPServerTransport
         this.transport = new StreamableHTTPServerTransport({
-            sessionIdGenerator: () => crypto.randomUUID(),
+            // sessionIdGenerator: () => crypto.randomUUID(), // Remove to enable stateless mode to allow multiple clients/restarts
             enableJsonResponse: true, // Enable simple JSON response for compatibility
         });
         // Connect server to transport

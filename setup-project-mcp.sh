@@ -36,19 +36,138 @@ print_success() { printf "%b%s%b %s\n" "$GREEN" "[SUCCESS]" "$NC" "$1"; }
 print_warning() { printf "%b%s%b %s\n" "$YELLOW" "[WARNING]" "$NC" "$1"; }
 print_error() { printf "%b%s%b %s\n" "$RED" "[ERROR]" "$NC" "$1"; }
 
-# setup_claude_code_hooks <project_path>
-# 将脚本目录下的 Claude Code hooks 复制到项目的 .claude/hooks
+# -----------------------------------------------------------------------------
+# 函数: merge_settings_json
+# 描述: 合并脚本目录下的 settings.json 和项目原有的 settings.json，
+#       通过读取 hooks 的 keys，如果目标 hooks 数组中不存在相同的命令，则追加合并，
+#       而不是直接覆盖原有的 hook 事件数组，从而保留用户自定义的 hooks。
+# 参数:
+#   $1 - source_file: 脚本目录下的 settings.json 路径
+#   $2 - target_file: 项目目录下的 settings.json 路径
+# 返回值: 无
+# -----------------------------------------------------------------------------
+merge_settings_json() {
+    local source_file="$1"
+    local target_file="$2"
+
+    if command -v node &> /dev/null; then
+        node -e "
+const fs = require('fs');
+const srcFile = process.argv[1];
+const tgtFile = process.argv[2];
+
+let srcData = {};
+try { srcData = JSON.parse(fs.readFileSync(srcFile, 'utf8')); } catch(e) { process.exit(1); }
+
+let tgtData = {};
+if (fs.existsSync(tgtFile)) {
+    try { tgtData = JSON.parse(fs.readFileSync(tgtFile, 'utf8')); } catch(e) {}
+}
+
+tgtData.hooks = tgtData.hooks || {};
+if (srcData.hooks) {
+    for (const key in srcData.hooks) {
+        if (!tgtData.hooks[key]) {
+            tgtData.hooks[key] = srcData.hooks[key];
+        } else {
+            // 对每个源配置的 matcher/hooks 组进行追加，前提是 command 没有重复
+            srcData.hooks[key].forEach(srcGroup => {
+                let merged = false;
+                tgtData.hooks[key].forEach(tgtGroup => {
+                    if (tgtGroup.matcher === srcGroup.matcher) {
+                        srcGroup.hooks.forEach(srcHook => {
+                            const exists = tgtGroup.hooks.some(tgtHook => tgtHook.command === srcHook.command);
+                            if (!exists) {
+                                tgtGroup.hooks.push(srcHook);
+                            }
+                        });
+                        merged = true;
+                    }
+                });
+                if (!merged) {
+                    tgtData.hooks[key].push(srcGroup);
+                }
+            });
+        }
+    }
+}
+
+fs.writeFileSync(tgtFile, JSON.stringify(tgtData, null, 2));
+" "$source_file" "$target_file"
+    elif command -v python3 &> /dev/null; then
+        python3 -c '
+import json, os, sys
+src_file = sys.argv[1]
+tgt_file = sys.argv[2]
+
+try:
+    with open(src_file, "r") as f:
+        src_data = json.load(f)
+except Exception:
+    sys.exit(1)
+
+tgt_data = {}
+if os.path.exists(tgt_file):
+    try:
+        with open(tgt_file, "r") as f:
+            tgt_data = json.load(f)
+    except Exception:
+        pass
+
+tgt_data.setdefault("hooks", {})
+if "hooks" in src_data:
+    for key, src_groups in src_data["hooks"].items():
+        if key not in tgt_data["hooks"]:
+            tgt_data["hooks"][key] = src_groups
+        else:
+            tgt_groups = tgt_data["hooks"][key]
+            for src_group in src_groups:
+                merged = False
+                for tgt_group in tgt_groups:
+                    if tgt_group.get("matcher") == src_group.get("matcher"):
+                        tgt_hooks = tgt_group.setdefault("hooks", [])
+                        for src_hook in src_group.get("hooks", []):
+                            if not any(h.get("command") == src_hook.get("command") for h in tgt_hooks):
+                                tgt_hooks.append(src_hook)
+                        merged = True
+                if not merged:
+                    tgt_groups.append(src_group)
+
+with open(tgt_file, "w") as f:
+    json.dump(tgt_data, f, indent=2)
+' "$source_file" "$target_file"
+    else
+        # 降级：如果没有 node/python3，但目标文件不存在，则直接 cp
+        if [ ! -f "$target_file" ]; then
+            cp "$source_file" "$target_file"
+        else
+            print_warning "缺少 node 或 python3，无法安全合并 settings.json，将不执行覆盖以免丢失您的配置。"
+            print_warning "请手动参考 $source_file 将 hooks 配置到 $target_file 中。"
+            return 1
+        fi
+    fi
+    print_success "已合并/复制 settings.json"
+}
+
+# -----------------------------------------------------------------------------
+# 函数: setup_claude_code_hooks
+# 描述: 将脚本目录下的 Claude Code hooks 及配置复制到项目的 .claude 目录下
+# 参数:
+#   $1 - project_path: 要配置的目标项目路径
+# 返回值: 无
+# -----------------------------------------------------------------------------
 setup_claude_code_hooks() {
     local project_path="$1"
 
     echo ""
     print_info "配置 Claude Code hooks..."
 
-    local hooks_source_dir hooks_dir
+    local hooks_source_dir hooks_dir claude_dir
     hooks_source_dir="$SCRIPT_DIR/script/claude_code_hooks"
 
     if [ -d "$hooks_source_dir" ]; then
-        hooks_dir="$project_path/.claude/hooks"
+        claude_dir="$project_path/.claude"
+        hooks_dir="$claude_dir/hooks"
         mkdir -p "$hooks_dir"
 
         if [ -f "$hooks_source_dir/session-start.mjs" ]; then
@@ -63,7 +182,11 @@ setup_claude_code_hooks() {
             print_success "已复制 session-end.mjs"
         fi
 
-        print_info "Hooks 配置完成到: $hooks_dir"
+        if [ -f "$hooks_source_dir/settings.json" ]; then
+            merge_settings_json "$hooks_source_dir/settings.json" "$claude_dir/settings.json"
+        fi
+
+        print_info "Hooks 配置完成到: $claude_dir"
     else
         print_warning "未找到 hooks 脚本目录: $hooks_source_dir，跳过 hooks 配置"
     fi

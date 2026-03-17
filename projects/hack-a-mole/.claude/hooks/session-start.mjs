@@ -7,22 +7,21 @@
 import * as fs from 'fs';
 import * as path from 'path';
 
-// 定义 hook 事件类型 (JSDoc 代替 TypeScript interface)
-/**
- * @typedef {Object} SessionStartEvent
- * @property {'SessionStart'} type
- * @property {string} sessionId
- * @property {Object} sessionContext
- * @property {string} sessionContext.projectDirectory
- */
+// 定义 hook 事件类型
+interface SessionStartEvent {
+  type: 'SessionStart';
+  sessionId: string;
+  sessionContext: {
+    projectDirectory: string;
+  };
+}
 
-/**
- * 简单的 YAML 解析器（只处理简单的 key: value 格式）
- * @param {string} content - YAML 文件内容
- * @returns {Object} - 解析后的配置对象
- */
-function parseSimpleYaml(content) {
-  const result = {};
+// 信号目录
+const SIGNALS_DIR = path.join(process.env.HOME || '', '.cc-power', 'signals');
+
+// 简单的 YAML 解析器（只处理简单的 key: value 格式）
+function parseSimpleYaml(content: string): any {
+  const result: any = {};
   const lines = content.split('\n');
 
   for (const line of lines) {
@@ -45,25 +44,15 @@ function parseSimpleYaml(content) {
   return result;
 }
 
-/**
- * 主函数，处理 SessionStart hook 事件
- * 读取标准输入，解析项目路径，并生成对应的注册信号文件
- * @returns {Promise<void>}
- */
+// 主函数
 async function main() {
   // 读取输入
-  let input = '';
-  try {
-    input = fs.readFileSync(0, 'utf-8'); // 读取 stdin
-  } catch (err) {
-    // 忽略错误
-  }
-
+  const input = process.stdin.read();
   if (!input) {
     process.exit(0);
   }
 
-  let event;
+  let event: SessionStartEvent;
   try {
     event = JSON.parse(input.toString());
   } catch (error) {
@@ -84,8 +73,8 @@ async function main() {
     path.join(projectDir, 'config.json'),
   ];
 
-  let config = null;
-  let configPath = null;
+  let config: any = null;
+  let configPath: string | null = null;
 
   for (const candidate of configPaths) {
     try {
@@ -109,9 +98,6 @@ async function main() {
 
   const projectId = path.basename(projectDir);
 
-  // 信号目录 (使用全局路径以适配 MCP 的自动发现机制)
-  const SIGNALS_DIR = path.join(process.env.HOME || '', '.cc-power', 'signals');
-
   // 创建信号目录
   fs.mkdirSync(SIGNALS_DIR, { recursive: true });
 
@@ -130,7 +116,7 @@ async function main() {
   fs.writeFileSync(signalPath, JSON.stringify(signal, null, 2));
 
   console.error(`Project ${projectId} registration signal written to ${signalPath}`);
-  console.error(`Use 'cc-power-mcp' MCP tool 'register_project' to register: { project_id: "${projectId}", provider: "${config.provider}", config: {...} }`);
+  console.error(`Use MCP tool 'register_project' to register: { project_id: "${projectId}", provider: "${config.provider}", config: {...} }`);
 }
 
 // 运行主函数
