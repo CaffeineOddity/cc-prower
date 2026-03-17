@@ -1,0 +1,14 @@
+{
+  "name": "e2e-tests",
+  "version": "1.0.0",
+  "description": "E2E Tests for CC-Power",
+  "type": "module",
+  "scripts": {
+    "test": "node run-all-tests.mjs",
+    "test:core": "npx tsx test-core.mjs",
+    "test:runner": "npx tsx test-runner.mjs",
+    "test:auto-discovery": "npx tsx test-auto-discovery.mjs",
+    "test:send-message": "npx tsx test-send-message.mjs",
+    "test:heartbeat": "npx tsx test-heartbeat-timeout-fast.mjs"
+  }
+}

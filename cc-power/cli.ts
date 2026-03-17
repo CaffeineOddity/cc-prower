@@ -7,7 +7,7 @@ import { ConfigManager } from './core/config.js';
 import { Logger } from './core/logger.js';
 import { Router } from './core/router.js';
 import { MessageLogger } from './core/message-logger.js';
-import { MCPServer } from 'cc-power-mcp';
+import { MCPServer } from '../cc-power-mcp/src/mcp/index.js';
 import type { ProjectConfig } from './types/config.js';
 
 const CLI_NAME = 'cc-power';

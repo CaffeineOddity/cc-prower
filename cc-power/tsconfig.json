@@ -15,7 +15,10 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "allowSyntheticDefaultImports": true,
-    "types": ["node"]
+    "types": ["node"],
+    "paths": {
+      "cc-power-mcp": ["../cc-power-mcp/src"]
+    }
   },
   "include": [
     "**/*.ts"

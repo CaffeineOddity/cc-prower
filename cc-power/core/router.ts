@@ -612,17 +612,6 @@ export class Router implements IRouter {
     return messages;
   }
 
-  /**
-   * 发送消息（BackendService 接口实现）
-   */
-  async sendMessage(args: {
-    provider: string;
-    chat_id: string;
-    content: string;
-    project_id?: string;
-  }): Promise<any> {
-    return await this.handleSendMessage(args);
-  }
 
   /**
    * 列出聊天（BackendService 接口实现）

@@ -2,10 +2,10 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as yaml from 'yaml';
-import { Logger } from './cc-power/core/logger.js';
-import { ConfigManager } from './cc-power/core/config.js';
-import { Router } from './cc-power/core/router.js';
-import { MessageLogger } from './cc-power/core/message-logger.js';
+import { Logger } from '../cc-power/core/logger.js';
+import { ConfigManager } from '../cc-power/core/config.js';
+import { Router } from '../cc-power/core/router.js';
+import { MessageLogger } from '../cc-power/core/message-logger.js';
 
 const CONFIG_FILES = ['.cc-power.yaml', 'cc-power.yaml', 'config.yaml'];
 
