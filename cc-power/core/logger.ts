@@ -36,9 +36,18 @@ export class Logger {
 
     if (this.file) {
       try {
-        await import('fs/promises').then(fs =>
-          fs.appendFile(this.file!, formattedMessage + '\n')
-        );
+        const fs = await import('fs/promises');
+        const path = await import('path');
+
+        // 确保目录存在
+        const dir = path.dirname(this.file);
+        try {
+          await fs.mkdir(dir, { recursive: true });
+        } catch {
+          // 如果目录创建失败，可能已存在，继续尝试写入
+        }
+
+        await fs.appendFile(this.file, formattedMessage + '\n');
       } catch (error) {
         // 文件写入失败时不影响控制台输出
         console.error('Failed to write to log file:', error);

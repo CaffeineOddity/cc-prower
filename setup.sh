@@ -52,7 +52,7 @@ print_success "构建完成"
 
 # 全局安装
 print_info "正在全局安装 ${CLI_NAME}..."
-pnpm link --global cc-power > /dev/null 2>&1
+cd cc-power && npm link > /dev/null 2>&1 && cd ..
 
 # 验证
 if command -v $CLI_NAME &> /dev/null; then

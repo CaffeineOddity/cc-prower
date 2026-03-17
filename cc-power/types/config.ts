@@ -4,14 +4,13 @@ export type ProviderType = 'feishu' | 'telegram' | 'whatsapp';
 // 全局配置
 export interface GlobalConfig {
   mcp: MCPConfig;
-  projects_dir: string;
   logging: LoggingConfig;
   providers: ProvidersConfig;
 }
 
 export interface MCPConfig {
   port?: number;
-  transport: 'stdio' | 'websocket';
+  transport: 'stdio' | 'http';
 }
 
 export interface LoggingConfig {

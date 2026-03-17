@@ -7,6 +7,7 @@ set -e
 
 # CLI 名称和配置文件
 CLI_NAME="cc-power"
+MCP_NAME="cc-power-mcp"
 CONFIG_FILES=(".cc-power.yaml" "cc-power.yaml" "config.yaml")
 
 # 颜色定义
@@ -153,16 +154,16 @@ echo ""
 print_info "配置 MCP 服务器..."
 
 # 检查是否已配置
-if claude mcp list 2>&1 | grep -q "chat-provider"; then
-    print_warning "chat-provider MCP 服务器已存在"
+if claude mcp list 2>&1 | grep -q "$MCP_NAME"; then
+    print_warning "$MCP_NAME MCP 服务器已存在"
     read -p "是否重新配置? (y/N): " reconfig
     if [[ ! $reconfig =~ ^[Yy]$ ]]; then
         print_info "保持现有配置"
     else
         print_info "移除现有配置..."
-        claude mcp remove chat-provider -s local > /dev/null 2>&1 || true
+        claude mcp remove $MCP_NAME -s local > /dev/null 2>&1 || true
         print_info "添加新的 MCP 服务器..."
-        if claude mcp add chat-provider -- $CLI_NAME start > /dev/null 2>&1; then
+        if claude mcp add $MCP_NAME -- $CLI_NAME start > /dev/null 2>&1; then
             print_success "MCP 服务器配置成功"
         else
             print_error "MCP 服务器配置失败"
@@ -170,7 +171,7 @@ if claude mcp list 2>&1 | grep -q "chat-provider"; then
     fi
 else
     print_info "添加 MCP 服务器..."
-    if claude mcp add chat-provider -- $CLI_NAME start > /dev/null 2>&1; then
+    if claude mcp add $MCP_NAME -- $CLI_NAME start > /dev/null 2>&1; then
         print_success "MCP 服务器配置成功"
     else
         print_error "MCP 服务器配置失败"
@@ -183,7 +184,7 @@ print_info "验证配置..."
 
 echo ""
 echo "=== MCP 服务器状态 ==="
-claude mcp list 2>&1 | grep -E "(chat-provider|Checking)" || echo "  chat-provider 未配置"
+claude mcp list 2>&1 | grep -E "$MCP_NAME|Checking" || echo "  $MCP_NAME 未配置"
 
 echo ""
 print_success "配置完成！"

@@ -8,10 +8,9 @@ import type {
   ProviderType,
 } from '../types/config.js';
 
-/**
- * 配置管理器
- * 负责加载和管理全局配置和项目配置
- */
+// 配置管理器
+// 负责加载和管理全局配置
+// 注意：项目配置现在由客户端通过 MCP 传递，不再从文件系统加载
 export class ConfigManager implements IConfigManager {
   private globalConfig: GlobalConfig | null = null;
   private projectsCache = new Map<string, ProjectConfig>();
@@ -26,7 +25,6 @@ export class ConfigManager implements IConfigManager {
 
       // 设置默认值
       config.mcp = config.mcp || { transport: 'stdio', port: 8080 };
-      config.projects_dir = config.projects_dir || './projects';
       config.logging = config.logging || { level: 'info' };
       config.providers = config.providers || {};
 
@@ -38,66 +36,31 @@ export class ConfigManager implements IConfigManager {
   }
 
   /**
-   * 加载项目配置
+   * 加载项目配置（已废弃，仅保留用于向后兼容）
+   * 现在项目配置由客户端通过 MCP 传递
    */
   async loadProject(projectId: string): Promise<ProjectConfig | null> {
-    if (!this.globalConfig) {
-      throw new Error('Global config not loaded');
-    }
-
     // 检查缓存
     if (this.projectsCache.has(projectId)) {
       return this.projectsCache.get(projectId)!;
     }
 
-    // 构建配置文件路径
-    // 支持两种路径格式：
-    // 1. projects_dir/projectId/config.yaml
-    // 2. projects_dir/projectId.yaml
-    const projectsDir = this.globalConfig.projects_dir;
-    const possiblePaths = [
-      path.join(projectsDir, projectId, 'config.yaml'),
-      path.join(projectsDir, `${projectId}.yaml`),
-    ];
-
-    for (const configPath of possiblePaths) {
-      try {
-        const content = await fs.readFile(configPath, 'utf-8');
-        const config = yaml.parse(content) as ProjectConfig;
-
-        // 验证配置
-        if (!config.provider) {
-          throw new Error(`Missing provider in ${configPath}`);
-        }
-
-        this.projectsCache.set(projectId, config);
-        return config;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-          throw error;
-        }
-        // 文件不存在，尝试下一个路径
-      }
-    }
-
+    // 现在项目配置由客户端通过 MCP 传递，不再从文件系统加载
     return null;
   }
 
   /**
-   * 监听配置文件变化
+   * 缓存项目配置（用于 MCP 注册的项目）
+   */
+  cacheProjectConfig(projectId: string, config: ProjectConfig): void {
+    this.projectsCache.set(projectId, config);
+  }
+
+  /**
+   * 监听配置文件变化（已废弃）
    */
   watch(callback: (projectId: string, config: ProjectConfig) => void): void {
-    if (!this.globalConfig) {
-      throw new Error('Global config not loaded');
-    }
-
-    const projectsDir = this.globalConfig.projects_dir;
-
-    // 使用 fs.watch 监听目录变化（简化实现）
-    // 实际生产环境应该使用 chokidar 等更精确的文件监听库
-    const watcher = fs.watch(projectsDir, { recursive: true });
-    // TODO: 实现文件变化监听回调
-    console.log('Config watcher started (callback not implemented)');
+    console.log('Config watch is deprecated. Projects are now registered via MCP.');
   }
 
   /**

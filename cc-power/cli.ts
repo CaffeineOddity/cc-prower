@@ -11,126 +11,15 @@ import { MCPServer } from 'cc-power-mcp';
 import type { ProjectConfig } from './types/config.js';
 
 const CLI_NAME = 'cc-power';
-const CONFIG_FILES = ['.cc-power.yaml', 'cc-power.yaml', 'config.yaml'];
-
-const packageJson = JSON.parse(
-  await fs.readFile(new URL('./package.json', import.meta.url), 'utf-8')
-);
-
-/**
- * 加载所有项目配置（仅在 CLI 命令中使用）
- */
-async function loadAllProjects(projectsDir: string): Promise<Map<string, ProjectConfig>> {
-  const projects = new Map<string, ProjectConfig>();
-
-  try {
-    await fs.access(projectsDir);
-  } catch {
-    return projects;
-  }
-
-  const entries = await fs.readdir(projectsDir, { withFileTypes: true });
-
-  for (const entry of entries) {
-    if (!entry.name.endsWith('.yaml') && !entry.isDirectory()) {
-      continue;
-    }
-
-    let projectId: string;
-
-    if (entry.isDirectory()) {
-      projectId = entry.name;
-    } else {
-      projectId = entry.name.replace('.yaml', '');
-    }
-
-    try {
-      const possiblePaths = [
-        path.join(projectsDir, projectId, 'config.yaml'),
-        path.join(projectsDir, `${projectId}.yaml`),
-      ];
-
-      for (const configPath of possiblePaths) {
-        try {
-          const content = await fs.readFile(configPath, 'utf-8');
-          const config = yaml.parse(content) as ProjectConfig;
-
-          if (!config.provider) {
-            throw new Error(`Missing provider in ${configPath}`);
-          }
-
-          projects.set(projectId, config);
-          break;
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-            throw error;
-          }
-        }
-      }
-    } catch (error) {
-      console.error(`Failed to load project ${projectId}:`, error);
-    }
-  }
-
-  return projects;
-}
-
-/**
- * 自动注册当前目录的项目
- */
-async function autoRegisterProject(
-  backend: any,
-  currentDir: string,
-  logger: Logger
-): Promise<string | null> {
-  const possibleConfigFiles = CONFIG_FILES.map(f => path.join(currentDir, f));
-
-  for (const configPath of possibleConfigFiles) {
-    try {
-      await fs.access(configPath);
-      const content = await fs.readFile(configPath, 'utf-8');
-
-      if (content.includes('provider:')) {
-        try {
-          const config = yaml.parse(content) as any;
-
-          if (config.provider) {
-            // 使用当前目录名作为项目 ID
-            const projectId = path.basename(currentDir);
-
-            logger.info(`Auto-registering project: ${projectId} from ${path.basename(configPath)}`);
-
-            // 构建项目配置
-            const projectConfig: any = {
-              projectId,
-              ...config,
-            };
-
-            // 注册项目
-            await backend.registerProject(projectId, projectConfig);
-
-            logger.info(`Project ${projectId} auto-registered successfully`);
-
-            return projectId;
-          }
-        } catch (parseError) {
-          logger.error(`Failed to parse config file ${configPath}:`, parseError);
-        }
-      }
-    } catch {
-      // 文件不存在，继续尝试
-    }
-  }
-
-  return null;
-}
+const CLI_VERSION = '1.0.0';
+const DEFAULT_CONFIG_FILE = './config.yaml';
 
 const program = new Command();
 
 program
   .name(CLI_NAME)
   .description('Lightweight bridge between Claude Code and chat platforms')
-  .version(packageJson.version);
+  .version(CLI_VERSION);
 
 program
   .command('start')
@@ -187,31 +76,8 @@ async function startService(options: any) {
 
   console.log(`Starting ${CLI_NAME}...`);
 
-  // 检查当前目录下是否有项目配置
-  const currentDir = process.cwd();
-  const possibleProjectConfigs = CONFIG_FILES.map(f => path.join(currentDir, f));
-
-  let actualConfigPath = configPath;
-  let autoDetectedProject = false;
-
-  // 尝试自动检测项目配置
-  for (const possiblePath of possibleProjectConfigs) {
-    try {
-      await fs.access(possiblePath);
-      const content = await fs.readFile(possiblePath, 'utf-8');
-
-      if (content.includes('provider:') || content.includes('provider:')) {
-        actualConfigPath = possiblePath;
-        autoDetectedProject = true;
-        console.log(`Auto-detected project config: ${path.basename(possiblePath)}`);
-        break;
-      }
-    } catch {
-      // 文件不存在，继续尝试
-    }
-  }
-
   // 加载配置
+  const actualConfigPath = configPath;
   const configManager = new ConfigManager();
   const globalConfig = await configManager.load(actualConfigPath);
 
@@ -219,7 +85,8 @@ async function startService(options: any) {
   const logger = new Logger(globalConfig.logging);
 
   logger.info(`${CLI_NAME} starting...`);
-  logger.info(`Config: ${actualConfigPath}${autoDetectedProject ? ' (auto-detected)' : ''}`);
+  logger.info(`Config: ${actualConfigPath}`);
+  logger.info(`Transport: ${globalConfig.mcp.transport}`);
 
   // 创建消息日志器
   const messageLogger = new MessageLogger('./logs/messages');
@@ -296,33 +163,57 @@ async function startService(options: any) {
     logError(message: string, ...args: any[]): void {
       logger.error(message, ...args);
     },
+
+    async sendHeartbeat(projectId: string): Promise<void> {
+      await router.sendHeartbeat(projectId);
+    },
+
+    getProjectHeartbeatStatus(projectId: string): { lastHeartbeat: number; isAlive: boolean } {
+      return router.getProjectHeartbeatStatus(projectId);
+    },
+
+    async getIncomingMessages(args: {
+      project_id: string;
+      since?: number;
+    }): Promise<any[]> {
+      return await router.getIncomingMessages(args);
+    },
+
+    setNotificationSender(sender: (message: any) => Promise<void>): void {
+      router.setNotificationSender(sender);
+    },
   };
 
   // 创建 MCP 服务器
   const mcpServer = new MCPServer(backend, {
     name: CLI_NAME,
-    version: packageJson.version,
+    version: CLI_VERSION,
+    http: globalConfig.mcp.transport === 'http' ? {
+      port: globalConfig.mcp.port || 8080,
+      host: '127.0.0.1',
+    } : undefined,
   });
 
-  // 自动注册当前目录的项目（如果存在）
-  const autoRegisteredProjectId = await autoRegisterProject(backend, currentDir, logger);
+  // 根据传输方式启动
+  if (globalConfig.mcp.transport === 'http') {
+    console.log(`${CLI_NAME} is ready. Listening on port ${globalConfig.mcp.port || 8080}.`);
+    console.log('Projects will be registered when clients connect via MCP.');
+    console.log('Press Ctrl+C to stop the server.\n');
 
-  // 启动 MCP 服务器
-  await mcpServer.startStdio();
+    await mcpServer.startHTTP(globalConfig.mcp.port || 8080);
+  } else {
+    console.log(`${CLI_NAME} is ready. Projects will be registered when clients connect via MCP.`);
+    console.log('Press Ctrl+C to stop the server.\n');
+
+    await mcpServer.startStdio();
+  }
 
   // 优雅关闭
   const shutdown = async () => {
     logger.info('Shutting down...');
 
-    // 取消注册自动注册的项目
-    if (autoRegisteredProjectId) {
-      try {
-        await backend.unregisterProject(autoRegisteredProjectId);
-        logger.info(`Auto-unregistered project: ${autoRegisteredProjectId}`);
-      } catch (error) {
-        logger.error(`Failed to auto-unregister project ${autoRegisteredProjectId}:`, error);
-      }
-    }
+    // 清理路由器资源
+    await router.cleanup();
 
     await mcpServer.stop();
     logger.info('Shutdown complete');
@@ -427,18 +318,16 @@ async function validateConfig(options: any) {
     const globalConfig = await configManager.load(configPath);
     console.log('✓ Global config is valid');
 
-    const projects = await loadAllProjects(globalConfig.projects_dir);
-    console.log(`✓ Found ${projects.size} projects`);
-
-    for (const [projectId, config] of projects) {
-      console.log(`✓ Project "${projectId}" (${config.provider})`);
+    console.log(`\nEnabled Providers:`);
+    for (const [provider, config] of Object.entries(globalConfig.providers)) {
+      console.log(`  - ${provider}: ${config.enabled ? 'enabled' : 'disabled'}`);
     }
   } catch (error) {
     console.error(`✗ Validation failed:`, error);
     process.exit(1);
   }
 
-  console.log('All configs are valid!');
+  console.log('Config is valid!');
 }
 
 /**
@@ -453,18 +342,10 @@ async function showStatus(options: any) {
 
   try {
     const globalConfig = await configManager.load(configPath);
-    const projects = await loadAllProjects(globalConfig.projects_dir);
 
     console.log(`\nGlobal Config: ${configPath}`);
     console.log(`Transport: ${globalConfig.mcp.transport}`);
-    console.log(`Projects Directory: ${globalConfig.projects_dir}`);
     console.log(`Log Level: ${globalConfig.logging.level}`);
-
-    console.log(`\nRegistered Projects: ${projects.size}`);
-
-    for (const [projectId, config] of projects) {
-      console.log(`  - ${projectId} (${config.provider})`);
-    }
 
     console.log(`\nEnabled Providers:`);
     for (const [provider, config] of Object.entries(globalConfig.providers)) {

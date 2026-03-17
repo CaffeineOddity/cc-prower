@@ -8,15 +8,12 @@ mcp:
   # port: 8080
   # host: "0.0.0.0"
 
-# 项目配置目录
-projects_dir: "./projects"
-
 # 日志配置
 logging:
   level: "info"
-  file: "./logs/cc-carry.log"
+  file: "./logs/cc-power.log"
 
-# Provider 配置
+# Provider 配置（仅用于启用/禁用，具体配置由客户端项目提供）
 providers:
   feishu:
     enabled: true
