@@ -111,22 +111,37 @@ build_project() {
 # 全局安装CLI
 # 进入对应子目录执行 npm link 操作
 install_global() {
+    print_info "正在清理旧的全局安装..."
+
+    # 卸载旧的全局安装
+    if command -v "$CLI_NAME" &> /dev/null; then
+        print_info "检测到已安装的 ${CLI_NAME}，正在卸载..."
+        npm unlink -g "$CLI_NAME" > /dev/null 2>&1 || true
+        cd cc-power && npm unlink -g > /dev/null 2>&1 || true
+        cd cc-power-mcp && npm unlink -g > /dev/null 2>&1 || true
+        cd ..
+        print_success "旧安装已清理"
+    fi
+
     print_info "正在全局安装 ${CLI_NAME}..."
     cd cc-power-mcp && npm link && cd ..
     cd cc-power && npm link cc-power-mcp && npm link && cd ..
+    print_success "${CLI_NAME} 已全局安装"
 }
 
 # 配置 MCP 服务器
 configure_mcp() {
     print_info "正在配置 Claude MCP..."
-    
-    # 检查是否已经存在
+
+    # 总是先移除旧配置
     if claude mcp list 2>&1 | grep -q "cc-power-mcp"; then
-        print_info "发现已存在的 cc-power-mcp 配置，正在更新..."
+        print_info "检测到已存在的 cc-power-mcp 配置，正在清理..."
         claude mcp remove "cc-power-mcp" > /dev/null 2>&1 || true
+        print_success "旧 MCP 配置已清理"
     fi
 
-    # 尝试添加 MCP
+    # 添加新配置
+    print_info "正在添加新的 MCP 配置..."
     if claude mcp add "cc-power-mcp" -- "ccpower" start --stdio > /dev/null 2>&1; then
         print_success "Claude MCP 配置成功！"
     else
@@ -164,10 +179,19 @@ main() {
     echo ""
     print_success "开发者配置完成！"
     echo ""
-    print_info "使用方法:"
-    echo "  1. 进入你的项目目录"
-    echo "  2. 运行 ccpower init (如果还没有配置文件)"
-    echo "  3. 运行 ccpower run ."
+    print_warning "重要：请按以下步骤完成设置"
+    echo ""
+    echo "  1. 重启 Claude Code 以加载新的 MCP 配置"
+    echo "     - 退出当前 Claude Code 会话"
+    echo "     - 重新打开项目"
+    echo ""
+    echo "  2. 重新启动所有 cc-power 相关服务"
+    echo "     - 关闭所有旧的 ccpower 进程: pkill -f ccpower"
+    echo "     - 启动新的 MCP 服务: ccpower start --stdio"
+    echo ""
+    echo "  3. 重新运行项目"
+    echo "     - 进入你的项目目录"
+    echo "     - 运行 ccpower run ."
     echo ""
 }
 
