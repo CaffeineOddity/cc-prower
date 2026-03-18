@@ -1,318 +1,136 @@
-import WebSocket from 'ws';
+import * as lark from '@larksuiteoapi/node-sdk';
 import { BaseProvider } from './base.js';
 import type { IncomingMessage, ProviderConfig, FeishuConfig } from '../types/index.js';
+import { FeishuConnectionManager } from '../core/feishu-connection-manager.js';
+import { Logger } from '../core/logger.js';
 
 /**
  * 飞书 (Feishu/Lark) Provider
- * 使用 WebSocket 长连接接收消息
+ * 使用官方 SDK 建立 WebSocket 长连接接收消息
  */
 export class FeishuProvider extends BaseProvider {
-  private ws: WebSocket | null = null;
-  private clientId: string;
-  private accessToken: string | null = null;
-  private reconnectInterval: NodeJS.Timeout | null = null;
-  private pollingInterval: NodeJS.Timeout | null = null;
-
-  // Retry mechanism constants
-  private retryAttempts: number = 0;
-  private maxRetryAttempts: number = 5;
-  private baseRetryDelay: number = 1000; // 1 second
-  private maxRetryDelay: number = 30000; // 30 seconds
+  private larkClient: lark.Client | null = null;
+  private connectionManager: FeishuConnectionManager;
+  private providerId: string | null = null;
+  private logger: Logger;
+  private userNameCache: Map<string, string> = new Map();
 
   constructor() {
     super('feishu');
-    this.clientId = `feishu_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    this.logger = new Logger({ level: 'info' });
+    this.connectionManager = FeishuConnectionManager.getInstance(this.logger);
   }
 
   async connect(config: ProviderConfig): Promise<void> {
     this.config = config;
     const feishuConfig = config as FeishuConfig;
 
-    const { app_id: appId, app_secret: appSecret } = feishuConfig;
+    const { app_id: appId, app_secret: appSecret, chat_id: chatId, priority = 0, keyword } = feishuConfig;
 
-    // Get tenant_access_token
-    await this.authenticateWithRetry(appId, appSecret);
+    if (!appId || !appSecret) {
+      throw new Error('Feishu configuration missing app_id or app_secret');
+    }
 
-    // Try to connect WebSocket with retry mechanism
-    await this.connectWebSocketWithRetry();
+    if (!chatId) {
+      throw new Error('Feishu configuration missing chat_id');
+    }
+
+    // Initialize Lark SDK Client for API calls
+    this.larkClient = new lark.Client({
+      appId,
+      appSecret,
+    });
+
+    // 使用连接管理器获取 WebSocket 连接
+    const { client, eventDispatcher } = await this.connectionManager.getOrConnect(appId, appSecret);
+
+    // 注册 Provider 到路由表
+    this.providerId = this.connectionManager.registerProvider(
+      appId,
+      config.projectId,
+      chatId,
+      priority,
+      keyword,
+      (data) => this.handleWsMessage(data)
+    );
 
     this.connected = true;
-    console.log('Feishu provider connected (WebSocket mode)');
+    console.log(`Feishu provider connected (chat_id: ${chatId}, priority: ${priority}${keyword ? `, keyword: ${keyword}` : ''})`);
   }
 
-  /**
-   * Authenticate with retry mechanism
-   */
-  private async authenticateWithRetry(appId: string, appSecret: string): Promise<void> {
-    let attempts = 0;
-
-    while (attempts < this.maxRetryAttempts) {
+  private async getUserName(userId: string): Promise<string> {
+    if (this.userNameCache.has(userId)) {
+      return this.userNameCache.get(userId)!;
+    }
+    
+    if (this.larkClient && userId !== 'unknown') {
       try {
-        await this.authenticate(appId, appSecret);
-        this.retryAttempts = 0; // Reset on success
-        return;
+        const resp = await this.larkClient.contact.user.get({
+          path: { user_id: userId },
+          params: { user_id_type: 'open_id' }
+        });
+        
+        if (resp.code === 0 && resp.data?.user?.name) {
+          const name = resp.data.user.name;
+          this.userNameCache.set(userId, name);
+          return name;
+        }
       } catch (error) {
-        attempts++;
-        this.retryAttempts = attempts;
-
-        if (attempts >= this.maxRetryAttempts) {
-          console.error(`Feishu authentication failed after ${this.maxRetryAttempts} attempts:`, error);
-          throw error;
-        }
-
-        const delay = this.calculateExponentialBackoffDelay();
-        console.log(`Authentication attempt ${attempts} failed, retrying in ${delay}ms...`);
-
-        await this.sleep(delay);
+        console.debug(`[Feishu] Failed to get user name for ${userId}, might lack permissions:`, (error as Error).message);
       }
     }
+    
+    return 'Unknown';
   }
 
-  /**
-   * Calculate exponential backoff delay with jitter
-   */
-  private calculateExponentialBackoffDelay(): number {
-    const baseDelay = this.baseRetryDelay * Math.pow(2, this.retryAttempts);
-    const cappedDelay = Math.min(baseDelay, this.maxRetryDelay);
-
-    // Add jitter to prevent thundering herd
-    const jitter = Math.random() * 0.1 * cappedDelay;
-    return Math.floor(cappedDelay + jitter);
-  }
-
-  /**
-   * Sleep for specified milliseconds
-   */
-  private sleep(ms: number): Promise<void> {
-    return new Promise(resolve => setTimeout(resolve, ms));
-  }
-
-  private async authenticate(appId: string, appSecret: string): Promise<void> {
-    const response = await this.fetchWithRetry('https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        app_id: appId,
-        app_secret: appSecret,
-      }),
-    });
-
-    const data = (await response.json()) as any;
-
-    if (data.code !== 0) {
-      throw new Error(`Feishu auth failed: ${data.msg}`);
-    }
-
-    this.accessToken = data.tenant_access_token;
-    console.log('Feishu authenticated successfully');
-  }
-
-  /**
-   * Fetch with retry mechanism
-   */
-  private async fetchWithRetry(url: string, options: RequestInit, maxRetries: number = 3): Promise<Response> {
-    let lastError: any;
-
-    for (let attempt = 0; attempt < maxRetries; attempt++) {
-      try {
-        const response = await fetch(url, options);
-
-        // If successful, return response
-        if (response.ok) {
-          return response;
-        }
-
-        // If it's the last attempt, throw the error
-        if (attempt === maxRetries - 1) {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-        }
-
-        // Wait before retry with exponential backoff
-        const delay = Math.pow(2, attempt) * 1000; // 1s, 2s, 4s...
-        console.log(`Request failed, retrying in ${delay}ms... (attempt ${attempt + 1}/${maxRetries})`);
-        await this.sleep(delay);
-      } catch (error) {
-        lastError = error;
-
-        if (attempt === maxRetries - 1) {
-          throw lastError;
-        }
-
-        // Wait before retry with exponential backoff
-        const delay = Math.pow(2, attempt) * 1000;
-        console.log(`Request failed, retrying in ${delay}ms... (attempt ${attempt + 1}/${maxRetries})`);
-        await this.sleep(delay);
-      }
-    }
-
-    throw lastError; // This line should never be reached, but added for TypeScript
-  }
-
-  private async connectWebSocketWithRetry(): Promise<void> {
-    let attempts = 0;
-
-    while (attempts < this.maxRetryAttempts) {
-      try {
-        await this.connectWebSocket();
-        this.retryAttempts = 0; // Reset on success
-        return;
-      } catch (error) {
-        attempts++;
-        this.retryAttempts = attempts;
-
-        if (attempts >= this.maxRetryAttempts) {
-          console.error(`WebSocket connection failed after ${this.maxRetryAttempts} attempts, falling back to polling:`, error);
-
-          // Fall back to polling if WebSocket connection fails
-          this.startPolling();
-          return;
-        }
-
-        const delay = this.calculateExponentialBackoffDelay();
-        console.log(`WebSocket connection attempt ${attempts} failed, retrying in ${delay}ms...`);
-
-        await this.sleep(delay);
-      }
+  private handleWsMessage(data: { message: any; sender?: any }): void {
+    const message = data.message;
+    const sender = data.sender;
+    if (message && (message.msg_type === 'text' || message.message_type === 'text')) {
+      this.handleIncomingMessage(message, sender);
     }
   }
 
-  private async connectWebSocket(): Promise<void> {
-    if (!this.accessToken) {
-      throw new Error('No access token available for WebSocket connection');
-    }
-
-    // Get WebSocket URL from Feishu API
-    const wsUrlResponse = await this.fetchWithRetry('https://open.feishu.cn/open-apis/im/v1/websocket_infos', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        app_id: (this.config as FeishuConfig).app_id,
-      }),
-    });
-
-    const wsUrlData: any = await wsUrlResponse.json();
-    if (wsUrlData.code !== 0) {
-      throw new Error(`Failed to get WebSocket URL: ${wsUrlData.msg}`);
-    }
-
-    const wsUrl = wsUrlData.data.url;
-    this.ws = new WebSocket(wsUrl);
-
-    this.ws.on('open', () => {
-      console.log('Feishu WebSocket connected');
-      this.retryAttempts = 0; // Reset retry count on successful connection
-    });
-
-    this.ws.on('message', (data: WebSocket.Data) => {
-      try {
-        const message = JSON.parse(data.toString());
-        this.handleWsMessage(message);
-      } catch (error) {
-        console.error('Error parsing WebSocket message:', error);
-      }
-    });
-
-    this.ws.on('close', (code, reason) => {
-      console.log(`Feishu WebSocket closed: ${code} ${reason}`);
-
-      // Try to reconnect after a delay
-      if (this.reconnectInterval) {
-        clearInterval(this.reconnectInterval);
-      }
-
-      this.reconnectInterval = setInterval(() => {
-        this.connectWebSocketWithRetry()
-          .catch(error => {
-            console.error('Failed to reconnect to Feishu WebSocket:', error);
-          });
-      }, 5000);
-    });
-
-    this.ws.on('error', (error) => {
-      console.error('Feishu WebSocket error:', error);
-    });
-  }
-
-  private handleWsMessage(message: any): void {
-    if (message.header?.event_type === 'im.message.receive_v1') {
-      const msgData = message.event?.message;
-      if (msgData && msgData.msg_type === 'text') {
-        this.handleIncomingMessage(msgData);
-      }
-    }
-  }
-
-  private startPolling(): void {
-    // Poll for new messages every 5 seconds
-    this.pollingInterval = setInterval(async () => {
-      await this.pollMessages();
-    }, 5000);
-  }
-
-  private async pollMessages(): Promise<void> {
-    if (!this.accessToken) {
-      return;
-    }
-
-    try {
-      // List recent messages
-      const response = await this.fetchWithRetry('https://open.feishu.cn/open-apis/im/v1/messages/list?container_id_type=chat&page_size=50', {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${this.accessToken}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      const data = (await response.json()) as any;
-
-      if (data.code === 99991668 || data.code === 99991663 || data.code === 99991664) {
-        // Token expired, re-authenticate
-        console.log('Feishu token expired, re-authenticating...');
-        const feishuConfig = this.config as FeishuConfig;
-        await this.authenticateWithRetry(feishuConfig.app_id, feishuConfig.app_secret);
-        return;
-      }
-
-      if (data.code === 0 && data.data?.items) {
-        for (const item of data.data.items) {
-          // Process only text messages
-          if (item.msg_type === 'text') {
-            await this.handleIncomingMessage(item);
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Error polling messages:', error);
-    }
-  }
-
-  private async handleIncomingMessage(message: any): Promise<void> {
+  private async handleIncomingMessage(message: any, sender?: any): Promise<void> {
     try {
       const content = JSON.parse(message.content);
-      const textContent = content.text || '';
+      let textContent = content.text || '';
+      
+      // 移除提及（mentions），例如 "@_user_1 "
+      if (message.mentions && Array.isArray(message.mentions)) {
+        message.mentions.forEach((mention: any) => {
+          if (mention.key) {
+            // 使用正则移除 mention key 及其后可能跟随的空格
+            const mentionRegex = new RegExp(`${mention.key}\\s*`, 'g');
+            textContent = textContent.replace(mentionRegex, '');
+          }
+        });
+      }
 
       if (!textContent) {
         return;
       }
+
+      // Extract sender info, either from sender arg or message.sender (for compatibility)
+      const actualSender = sender || message.sender;
+      const senderId = actualSender?.sender_id || actualSender?.id || {};
+      const userId = senderId.open_id || senderId.union_id || 'unknown';
+      
+      const senderName = await this.getUserName(userId);
+      console.log(`[Feishu] Received message from ${senderName}: ${textContent}`);
 
       const incomingMessage: IncomingMessage = {
         type: 'incoming',
         provider: 'feishu',
         projectId: this.config?.projectId || '',
         chatId: message.chat_id,
-        userId: message.sender?.id || 'unknown',
-        userName: message.sender?.name || 'Unknown',
+        userId: userId,
+        userName: senderName,
         content: textContent,
         timestamp: message.create_time || Date.now(),
         metadata: {
           message_id: message.message_id,
-          message_type: message.msg_type,
+          message_type: message.message_type || message.msg_type,
         },
       };
 
@@ -325,46 +143,41 @@ export class FeishuProvider extends BaseProvider {
   }
 
   async sendMessage(chatId: string, content: string): Promise<void> {
-    if (!this.accessToken) {
+    if (!this.larkClient) {
       throw new Error('Not authenticated');
     }
 
-    const response = await this.fetchWithRetry('https://open.feishu.cn/open-apis/im/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${this.accessToken}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        receive_id: chatId,
-        receive_id_type: 'chat_id',
-        msg_type: 'text',
-        content: JSON.stringify({ text: content }),
-      }),
-    });
+    try {
+      console.log(`[Feishu] Sending message to ${chatId}: ${content}`);
+      
+      const response = await this.larkClient.im.message.create({
+        params: {
+          receive_id_type: 'chat_id',
+        },
+        data: {
+          receive_id: chatId,
+          msg_type: 'text',
+          content: JSON.stringify({ text: content }),
+        }
+      });
 
-    const data = (await response.json()) as any;
-
-    if (data.code !== 0) {
-      throw new Error(`Failed to send message: ${data.msg}`);
+      if (response.code !== 0) {
+        throw new Error(`Failed to send message: ${response.msg}`);
+      }
+    } catch (error) {
+      console.error('Failed to send Feishu message:', error);
+      throw error;
     }
   }
 
   async disconnect(): Promise<void> {
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
+    if (this.providerId) {
+      this.connectionManager.unregisterProvider(this.providerId);
+      this.providerId = null;
     }
-    if (this.pollingInterval) {
-      clearInterval(this.pollingInterval);
-      this.pollingInterval = null;
-    }
-    if (this.reconnectInterval) {
-      clearTimeout(this.reconnectInterval);
-      this.reconnectInterval = null;
-    }
+
     this.connected = false;
-    this.accessToken = null;
+    this.larkClient = null;
     super.disconnect();
   }
 }

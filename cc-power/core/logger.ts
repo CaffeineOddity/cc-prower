@@ -32,7 +32,7 @@ export class Logger {
   }
 
   private async write(formattedMessage: string): Promise<void> {
-    console.log(formattedMessage);
+    console.error(formattedMessage);
 
     if (this.file) {
       try {

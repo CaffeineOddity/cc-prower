@@ -50,6 +50,9 @@ export interface FeishuConfig extends ProviderConfig {
   app_secret: string;
   bot_name?: string;
   allowed_users?: string[];
+  chat_id?: string;      // 监听的群ID（单个）
+  priority?: number;     // 优先级，数字越大优先级越高，默认0
+  keyword?: string;      // 关键词过滤，消息包含此关键词才触发（可选）
 }
 
 export interface TelegramConfig extends ProviderConfig {

@@ -23,9 +23,10 @@
   "author": "",
   "license": "MIT",
   "bin": {
-    "cc-power": "./dist/cli.js"
+    "ccpower": "./dist/cli.js"
   },
   "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.59.0",
     "@types/write-file-atomic": "^4.0.3",
     "cc-power-mcp": "workspace:*",
     "chokidar": "^5.0.0",

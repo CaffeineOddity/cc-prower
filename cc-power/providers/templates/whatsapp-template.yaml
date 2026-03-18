@@ -1,0 +1,14 @@
+# WhatsApp Provider Configuration
+
+provider: whatsapp
+
+whatsapp:
+  phone_number: "your_phone_number_id_here"
+  api_key: "your_api_key_here"
+  chat_id: "+1234567890"
+  priority: 10
+  keyword: ""  # Optional: only trigger if message contains this keyword
+
+session:
+  max_history: 50
+  timeout_minutes: 30

@@ -87,6 +87,10 @@ export declare class MCPServer {
      */
     private setupHandlers;
     /**
+     * 尝试从当前目录推断 Project ID
+     */
+    private inferProjectId;
+    /**
      * 处理 send_message 工具
      */
     private sendMessage;

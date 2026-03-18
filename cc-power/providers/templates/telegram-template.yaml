@@ -1,0 +1,13 @@
+# Telegram Provider Configuration
+
+provider: telegram
+
+telegram:
+  bot_token: "your_bot_token_here"
+  chat_id: "123456789"
+  priority: 10
+  keyword: ""  # Optional: only trigger if message contains this keyword
+
+session:
+  max_history: 50
+  timeout_minutes: 30

@@ -51,16 +51,16 @@ providers:
 ### 3. Start the Service
 ```bash
 # Start the CC-Power service (runs in background)
-npx cc-power start
+ccpower start
 
 # Or start with stdio mode explicitly (recommended for Claude Code MCP integration)
-npx cc-power start --stdio
+ccpower start --stdio
 ```
 
 ### 4. Create a Project
 ```bash
 # Initialize a new project
-npx cc-power init my-project --provider feishu
+ccpower init my-project --provider feishu
 
 # Edit the project config at projects/my-project/config.yaml with your credentials
 ```
@@ -68,7 +68,7 @@ npx cc-power init my-project --provider feishu
 ### 5. Run a Project with Tmux Integration
 ```bash
 # Use the new run command to start a project in a Tmux session
-npx cc-power run /path/to/your/project
+ccpower run /path/to/your/project
 
 # This creates a shared session where both local input and IM messages go to the same Claude instance
 ```
@@ -83,7 +83,7 @@ The new architecture uses a file system signal approach for project lifecycle ma
 
 ## Tmux Integration
 
-The `cc-power run` command creates shared Tmux sessions:
+The `ccpower run` command creates shared Tmux sessions:
 - Uses MD5 hash of project path as unique project ID
 - Allows both local user input and remote IM messages to drive the same Claude instance
 - Provides automatic project history tracking for restart capabilities
@@ -98,22 +98,22 @@ The `cc-power run` command creates shared Tmux sessions:
 
 ```bash
 # Start the service
-npx cc-power start [--stdio]
+ccpower start [--stdio]
 
 # Initialize a new project
-npx cc-power init [project-name] --provider [feishu|telegram|whatsapp]
+ccpower init [project-name] --provider [feishu|telegram|whatsapp]
 
 # Run a project with Tmux integration
-npx cc-power run <project_path> [--session <name>] [--dangerously-skip-permissions]
+ccpower run <project_path> [--session <name>] [--dangerously-skip-permissions]
 
 # Validate configuration
-npx cc-power validate [-c config.yaml]
+ccpower validate [-c config.yaml]
 
 # Show service status
-npx cc-power status [-c config.yaml]
+ccpower status [-c config.yaml]
 
 # View message logs
-npx cc-power logs [project-name] [-c 50] [-o readable|json] [-w] [--chat <chatId>]
+ccpower logs [project-name] [-c 50] [-o readable|json] [-w] [--chat <chatId>]
 ```
 
 ## Security
@@ -138,5 +138,5 @@ cd cc-power && npm run build
 npm test
 
 # Start in development mode
-npx cc-power start --stdio
+ccpower start --stdio
 ```

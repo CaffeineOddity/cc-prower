@@ -4,6 +4,9 @@ feishu:
   app_id: "cli_a93c0992f1399ccd"
   app_secret: "egnFaEXVpX7XSWenOCgOvzZHqsh51tuO"
   bot_name: "cc-power"
+  chat_id: "oc_f43ebe730fa4d06caa88cec9197e8cf7"      # 监听的群ID
+  priority: 10           # 优先级（可选）
+  keyword: ""       # 关键词（可选）
 #  allowed_users:
 #    - "ou_user_id_1"
 #    - "ou_user_id_2"

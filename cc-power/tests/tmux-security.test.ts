@@ -72,8 +72,10 @@ describe('Tmux functionality', () => {
       mockChildProcess.exec.mockImplementation(mockExec1);
       mockChildProcess.promisify.mockReturnValue(mockPromisify1);
 
-      mockExec1.mockResolvedValueOnce({ stdout: '0:test-session:0:0:bash' }) // Process check
-        .mockResolvedValueOnce({ stdout: '', stderr: '' }); // Send keys
+      // Mock successful checks
+      mockExec1.mockResolvedValueOnce({ stdout: '', stderr: '' }) // has-session check
+        .mockResolvedValueOnce({ stdout: '0:1234:bash' }) // Process check
+        .mockResolvedValueOnce({ stdout: '' }); // send-keys
 
       const message = {
         type: 'incoming',
@@ -103,7 +105,7 @@ describe('Tmux functionality', () => {
       mockChildProcess.exec.mockImplementation(mockExec2);
       mockChildProcess.promisify.mockReturnValue(mockPromisify2);
 
-      mockExec2.mockResolvedValueOnce({ stdout: '0:test-session:0:0:rm' }); // Unsafe process
+      mockExec2.mockResolvedValueOnce({ stdout: '0:1234:rm' }); // Unsafe process
 
       const message: any = {
         type: 'incoming',
@@ -143,7 +145,7 @@ describe('Tmux functionality', () => {
 
       // Mock successful session check
       mockExec3.mockResolvedValueOnce({ stdout: '', stderr: '' }) // has-session check
-        .mockResolvedValueOnce({ stdout: '0:test-session:0:0:bash' }); // Process check
+        .mockResolvedValueOnce({ stdout: '0:1234:bash' }); // Process check
 
       // Create a message to trigger the check
       const message = {

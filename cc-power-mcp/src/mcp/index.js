@@ -1,6 +1,8 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema, } from '@modelcontextprotocol/sdk/types.js';
+import * as fs from 'fs';
+import * as path from 'path';
 /**
  * MCP 服务器
  * 提供 MCP 工具供 Claude Code 调用
@@ -208,9 +210,38 @@ export class MCPServer {
         });
     }
     /**
+     * 尝试从当前目录推断 Project ID
+     */
+    async inferProjectId() {
+        try {
+            const cwd = process.cwd();
+            // 检查当前目录下是否有项目配置文件，避免在非项目目录下误判
+            const hasConfig = fs.existsSync(path.join(cwd, '.cc-power.yaml')) ||
+                fs.existsSync(path.join(cwd, 'config.yaml'));
+            if (!hasConfig) {
+                return undefined;
+            }
+            const crypto = await import('crypto');
+            // 必须与 cli 中的生成规则保持绝对一致，使用 path.resolve
+            const normalizedPath = path.resolve(cwd).replace(/\/$/, '');
+            const projectId = crypto.createHash('md5').update(normalizedPath).digest('hex').substring(0, 8);
+            return projectId;
+        }
+        catch (error) {
+            this.backend.logWarn('Failed to infer project ID from CWD:', error);
+            return undefined;
+        }
+    }
+    /**
      * 处理 send_message 工具
      */
     async sendMessage(args) {
+        if (!args.project_id) {
+            args.project_id = await this.inferProjectId();
+            if (args.project_id) {
+                this.backend.logInfo(`Auto-inferred project ID for sendMessage: ${args.project_id}`);
+            }
+        }
         await this.backend.sendMessage(args);
         return {
             success: true,
@@ -221,6 +252,12 @@ export class MCPServer {
      * 处理 list_chats 工具
      */
     async listChats(args) {
+        if (!args.project_id) {
+            args.project_id = await this.inferProjectId();
+            if (args.project_id) {
+                this.backend.logInfo(`Auto-inferred project ID for listChats: ${args.project_id}`);
+            }
+        }
         return await this.backend.listChats(args);
     }
     /**
@@ -286,6 +323,12 @@ export class MCPServer {
      * 处理 get_incoming_messages 工具
      */
     async getIncomingMessages(args) {
+        if (!args.project_id) {
+            args.project_id = (await this.inferProjectId()) || '';
+            if (args.project_id) {
+                this.backend.logInfo(`Auto-inferred project ID for getIncomingMessages: ${args.project_id}`);
+            }
+        }
         const { project_id: projectId, since } = args;
         try {
             const messages = await this.backend.getIncomingMessages({ project_id: projectId, since });

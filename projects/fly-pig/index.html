@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>飞猪游戏</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: linear-gradient(180deg, #87CEEB 0%, #E0F6FF 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            font-family: 'Arial', sans-serif;
+            overflow: hidden;
+        }
+
+        .game-container {
+            position: relative;
+            width: 400px;
+            height: 600px;
+            background: linear-gradient(180deg, #87CEEB 0%, #B4E4FF 50%, #98D8AA 100%);
+            border-radius: 20px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+
+        .cloud {
+            position: absolute;
+            background: white;
+            border-radius: 50%;
+            opacity: 0.9;
+            animation: float 20s infinite linear;
+        }
+
+        .cloud::before, .cloud::after {
+            content: '';
+            position: absolute;
+            background: white;
+            border-radius: 50%;
+        }
+
+        @keyframes float {
+            from { transform: translateX(-100px); }
+            to { transform: translateX(450px); }
+        }
+
+        .pig {
+            position: absolute;
+            width: 60px;
+            height: 70px;
+            transition: left 0.15s ease-out;
+            z-index: 10;
+        }
+
+        .pig-body {
+            position: relative;
+            width: 60px;
+            height: 50px;
+            background: #FFB6C1;
+            border-radius: 50%;
+            box-shadow: inset -5px -5px 10px rgba(0,0,0,0.1);
+        }
+
+        .pig-head {
+            position: absolute;
+            width: 35px;
+            height: 30px;
+            background: #FFB6C1;
+            border-radius: 50%;
+            top: -15px;
+            left: 12px;
+            box-shadow: inset -3px -3px 5px rgba(0,0,0,0.1);
+        }
+
+        .pig-ears {
+            position: absolute;
+        }
+
+        .pig-ear {
+            position: absolute;
+            width: 15px;
+            height: 12px;
+            background: #FFB6C1;
+            border-radius: 50% 50% 0 0;
+            top: -25px;
+        }
+
+        .pig-ear.left { left: 12px; transform: rotate(-20deg); }
+        .pig-ear.right { left: 33px; transform: rotate(20deg); }
+
+        .pig-ear-inner {
+            position: absolute;
+            width: 8px;
+            height: 6px;
+            background: #FF69B4;
+            border-radius: 50%;
+            top: 3px;
+            left: 3px;
+        }
+
+        .pig-eyes {
+            position: absolute;
+            top: -10px;
+            left: 18px;
+        }
+
+        .pig-eye {
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            background: #333;
+            border-radius: 50%;
+        }
+
+        .pig-eye.left { left: 0; }
+        .pig-eye.right { left: 18px; }
+
+        .pig-eye::after {
+            content: '';
+            position: absolute;
+            width: 3px;
+            height: 3px;
+            background: white;
+            border-radius: 50%;
+            top: 1px;
+            left: 1px;
+        }
+
+        .pig-snout {
+            position: absolute;
+            width: 20px;
+            height: 15px;
+            background: #FF69B4;
+            border-radius: 50%;
+            top: -5px;
+            left: 20px;
+        }
+
+        .pig-nostril {
+            position: absolute;
+            width: 4px;
+            height: 4px;
+            background: #CC5588;
+            border-radius: 50%;
+            top: 5px;
+        }
+
+        .pig-nostril.left { left: 4px; }
+        .pig-nostril.right { left: 12px; }
+
+        .pig-wings {
+            position: absolute;
+            top: 0px;
+        }
+
+        .pig-wing {
+            position: absolute;
+            width: 25px;
+            height: 30px;
+            background: #FFB6C1;
+            border-radius: 0 50% 50% 50%;
+            transform-origin: left bottom;
+            animation: flap 0.3s ease-in-out infinite;
+        }
+
+        .pig-wing.left {
+            left: -20px;
+            transform: rotate(-30deg);
+        }
+
+        .pig-wing.right {
+            right: -20px;
+            transform: rotate(30deg) scaleX(-1);
+        }
+
+        @keyframes flap {
+            0%, 100% { transform: rotate(-45deg); }
+            50% { transform: rotate(-15deg); }
+        }
+
+        .obstacle {
+            position: absolute;
+            width: 30px;
+            background: linear-gradient(180deg, #4A7C59 0%, #2D5A3D 100%);
+            border-radius: 5px 5px 0 0;
+            z-index: 5;
+        }
+
+        .coin {
+            position: absolute;
+            width: 25px;
+            height: 25px;
+            background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%);
+            border-radius: 50%;
+            border: 3px solid #FF8C00;
+            z-index: 6;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            from { transform: rotateY(0deg); }
+            to { transform: rotateY(360deg); }
+        }
+
+        .ground {
+            position: absolute;
+            bottom: 0;
+            width: 100%;
+            height: 80px;
+            background: linear-gradient(180deg, #98D8AA 0%, #7BC47F 100%);
+            z-index: 8;
+        }
+
+        .ground-grass {
+            position: absolute;
+            top: 0;
+            width: 100%;
+            height: 15px;
+            background: #5DBB63;
+        }
+
+        .ui {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            right: 10px;
+            display: flex;
+            justify-content: space-between;
+            z-index: 100;
+            padding: 0 10px;
+        }
+
+        .score-box, .highscore-box {
+            background: rgba(255,255,255,0.9);
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-weight: bold;
+            color: #333;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        }
+
+        .start-screen, .game-over-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.7);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            z-index: 200;
+            color: white;
+        }
+
+        .start-screen h1, .game-over-screen h1 {
+            font-size: 32px;
+            margin-bottom: 20px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+
+        .start-screen p, .game-over-screen p {
+            font-size: 16px;
+            margin-bottom: 30px;
+            text-align: center;
+            padding: 0 20px;
+        }
+
+        .btn {
+            padding: 15px 40px;
+            font-size: 18px;
+            background: linear-gradient(180deg, #FF6B6B 0%, #EE5A5A 100%);
+            color: white;
+            border: none;
+            border-radius: 30px;
+            cursor: pointer;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.3);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .btn:hover {
+            transform: scale(1.05);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.4);
+        }
+
+        .btn:active {
+            transform: scale(0.95);
+        }
+
+        .game-over-screen {
+            display: none;
+        }
+
+        .final-score {
+            font-size: 48px;
+            color: #FFD700;
+            margin: 20px 0;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+        }
+
+        .instructions {
+            background: rgba(255,255,255,0.2);
+            padding: 15px 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .instructions p {
+            margin: 5px 0;
+            font-size: 14px;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container" id="gameContainer">
+        <div class="ui">
+            <div class="score-box">分数: <span id="score">0</span></div>
+            <div class="highscore-box">最高: <span id="highScore">0</span></div>
+        </div>
+
+        <div class="start-screen" id="startScreen">
+            <h1>🐷 飞猪游戏</h1>
+            <div class="instructions">
+                <p>点击屏幕或按空格键让飞猪飞翔</p>
+                <p>躲避障碍物，收集金币！</p>
+            </div>
+            <button class="btn" id="startBtn">开始游戏</button>
+        </div>
+
+        <div class="game-over-screen" id="gameOverScreen">
+            <h1>游戏结束</h1>
+            <div class="final-score" id="finalScore">0</div>
+            <p>点击重新开始</p>
+            <button class="btn" id="restartBtn">再来一次</button>
+        </div>
+
+        <div class="ground">
+            <div class="ground-grass"></div>
+        </div>
+    </div>
+
+    <script>
+        const gameContainer = document.getElementById('gameContainer');
+        const scoreDisplay = document.getElementById('score');
+        const highScoreDisplay = document.getElementById('highScore');
+        const startScreen = document.getElementById('startScreen');
+        const gameOverScreen = document.getElementById('gameOverScreen');
+        const finalScoreDisplay = document.getElementById('finalScore');
+        const startBtn = document.getElementById('startBtn');
+        const restartBtn = document.getElementById('restartBtn');
+
+        let pig;
+        let pigY = 300;
+        let pigVelocity = 0;
+        let gravity = 0.5;
+        let jumpForce = -10;
+        let score = 0;
+        let highScore = localStorage.getItem('flyPigHighScore') || 0;
+        let gameRunning = false;
+        let obstacles = [];
+        let coins = [];
+        let clouds = [];
+        let gameLoop;
+        let obstacleLoop;
+        let coinLoop;
+
+        highScoreDisplay.textContent = highScore;
+
+        function createCloud() {
+            const cloud = document.createElement('div');
+            cloud.className = 'cloud';
+            const size = 40 + Math.random() * 40;
+            cloud.style.width = size + 'px';
+            cloud.style.height = size * 0.6 + 'px';
+            cloud.style.top = Math.random() * 200 + 'px';
+            cloud.style.left = '-100px';
+            cloud.style.animationDuration = (15 + Math.random() * 10) + 's';
+            gameContainer.appendChild(cloud);
+            clouds.push(cloud);
+
+            setTimeout(() => {
+                cloud.remove();
+                clouds = clouds.filter(c => c !== cloud);
+            }, 25000);
+        }
+
+        function createPig() {
+            pig = document.createElement('div');
+            pig.className = 'pig';
+            pig.innerHTML = `
+                <div class="pig-wings">
+                    <div class="pig-wing left"></div>
+                    <div class="pig-wing right"></div>
+                </div>
+                <div class="pig-ears">
+                    <div class="pig-ear left"><div class="pig-ear-inner"></div></div>
+                    <div class="pig-ear right"><div class="pig-ear-inner"></div></div>
+                </div>
+                <div class="pig-body"></div>
+                <div class="pig-head"></div>
+                <div class="pig-eyes">
+                    <div class="pig-eye left"></div>
+                    <div class="pig-eye right"></div>
+                </div>
+                <div class="pig-snout">
+                    <div class="pig-nostril left"></div>
+                    <div class="pig-nostril right"></div>
+                </div>
+            `;
+            pig.style.left = '50px';
+            pigY = 300;
+            pig.style.top = pigY + 'px';
+            gameContainer.appendChild(pig);
+        }
+
+        function createObstacle() {
+            if (!gameRunning) return;
+            const obstacle = document.createElement('div');
+            obstacle.className = 'obstacle';
+            const height = 100 + Math.random() * 200;
+            const isTop = Math.random() > 0.5;
+
+            if (isTop) {
+                obstacle.style.height = height + 'px';
+                obstacle.style.top = '0';
+            } else {
+                obstacle.style.height = height + 'px';
+                obstacle.style.bottom = '80px';
+            }
+
+            obstacle.style.left = '400px';
+            gameContainer.appendChild(obstacle);
+            obstacles.push({ element: obstacle, x: 400, height, isTop });
+
+            // 添加金币在障碍物中间
+            if (Math.random() > 0.5) {
+                createCoin(400, isTop ? height + 30 : 600 - height - 80 - 30);
+            }
+        }
+
+        function createCoin(x, y) {
+            const coin = document.createElement('div');
+            coin.className = 'coin';
+            coin.style.left = x + 15 + 'px';
+            coin.style.top = y + 'px';
+            gameContainer.appendChild(coin);
+            coins.push({ element: coin, x: x + 15, y });
+        }
+
+        function jump() {
+            if (!gameRunning) return;
+            pigVelocity = jumpForce;
+        }
+
+        function checkCollision(rect1, rect2) {
+            return rect1.left < rect2.right &&
+                   rect1.right > rect2.left &&
+                   rect1.top < rect2.bottom &&
+                   rect1.bottom > rect2.top;
+        }
+
+        function gameOver() {
+            gameRunning = false;
+            clearInterval(gameLoop);
+            clearInterval(obstacleLoop);
+            clearInterval(coinLoop);
+
+            if (score > highScore) {
+                highScore = score;
+                localStorage.setItem('flyPigHighScore', highScore);
+                highScoreDisplay.textContent = highScore;
+            }
+
+            finalScoreDisplay.textContent = score;
+            gameOverScreen.style.display = 'flex';
+        }
+
+        function update() {
+            if (!gameRunning) return;
+
+            // 更新猪的位置
+            pigVelocity += gravity;
+            pigY += pigVelocity;
+
+            // 边界检查
+            if (pigY < 0) {
+                pigY = 0;
+                pigVelocity = 0;
+            }
+            if (pigY > 600 - 70 - 80) {
+                gameOver();
+                return;
+            }
+
+            pig.style.top = pigY + 'px';
+
+            const pigRect = {
+                left: 50,
+                right: 110,
+                top: pigY,
+                bottom: pigY + 70
+            };
+
+            // 更新障碍物
+            obstacles.forEach((obs, index) => {
+                obs.x -= 3;
+                obs.element.style.left = obs.x + 'px';
+
+                const obsRect = {
+                    left: obs.x,
+                    right: obs.x + 30,
+                    top: obs.isTop ? 0 : 600 - obs.height - 80,
+                    bottom: obs.isTop ? obs.height : 600 - 80
+                };
+
+                if (checkCollision(pigRect, obsRect)) {
+                    gameOver();
+                    return;
+                }
+
+                if (obs.x < -30) {
+                    obs.element.remove();
+                    obstacles.splice(index, 1);
+                    score += 10;
+                    scoreDisplay.textContent = score;
+                }
+            });
+
+            // 更新金币
+            coins.forEach((coin, index) => {
+                coin.x -= 3;
+                coin.element.style.left = coin.x + 'px';
+
+                const coinRect = {
+                    left: coin.x,
+                    right: coin.x + 25,
+                    top: coin.y,
+                    bottom: coin.y + 25
+                };
+
+                if (checkCollision(pigRect, coinRect)) {
+                    coin.element.remove();
+                    coins.splice(index, 1);
+                    score += 50;
+                    scoreDisplay.textContent = score;
+                }
+
+                if (coin.x < -25) {
+                    coin.element.remove();
+                    coins.splice(index, 1);
+                }
+            });
+        }
+
+        function startGame() {
+            startScreen.style.display = 'none';
+            gameOverScreen.style.display = 'none';
+            gameRunning = true;
+            score = 0;
+            scoreDisplay.textContent = '0';
+
+            obstacles.forEach(obs => obs.element.remove());
+            coins.forEach(coin => coin.element.remove());
+            obstacles = [];
+            coins = [];
+
+            if (pig) pig.remove();
+            createPig();
+
+            gameLoop = setInterval(update, 1000 / 60);
+            obstacleLoop = setInterval(createObstacle, 2000);
+            coinLoop = setInterval(createCloud, 5000);
+        }
+
+        startBtn.addEventListener('click', startGame);
+        restartBtn.addEventListener('click', startGame);
+
+        gameContainer.addEventListener('click', jump);
+        document.addEventListener('keydown', (e) => {
+            if (e.code === 'Space') {
+                e.preventDefault();
+                if (gameRunning) {
+                    jump();
+                } else if (startScreen.style.display !== 'none') {
+                    startGame();
+                } else if (gameOverScreen.style.display !== 'none') {
+                    startGame();
+                }
+            }
+        });
+
+        // 初始云朵
+        for (let i = 0; i < 3; i++) {
+            setTimeout(() => createCloud(), i * 3000);
+        }
+    </script>
+</body>
+</html>

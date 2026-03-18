@@ -6,7 +6,7 @@
 set -e
 
 # CLI 名称
-CLI_NAME="cc-power"
+CLI_NAME="ccpower"
 
 # 颜色定义
 RED='\033[0;31m'
@@ -48,22 +48,51 @@ check_directory() {
         exit 1
     fi
 
-    # 检查是否安装了 tmux
+    # 检查并自动安装 tmux
     if ! command -v tmux &> /dev/null; then
-        print_error "未检测到 tmux，请先安装 tmux。"
-        echo ""
-        echo "macOS 用户可以使用："
-        echo "  brew install tmux"
-        echo ""
-        echo "Ubuntu/Debian 用户可以使用："
-        echo "  apt-get update && apt-get install tmux"
-        echo ""
-        echo "CentOS/RHEL 用户可以使用："
-        echo "  yum install tmux"
-        echo "  # 或者"
-        echo "  dnf install tmux"
-        echo ""
-        exit 1
+        print_info "未检测到 tmux，尝试自动安装..."
+        
+        # 获取操作系统类型
+        OS="$(uname -s)"
+        case "${OS}" in
+            Darwin*)
+                if command -v brew &> /dev/null; then
+                    print_info "检测到 macOS，使用 Homebrew 安装 tmux..."
+                    brew install tmux
+                else
+                    print_error "未检测到 Homebrew，请先安装 Homebrew 或手动安装 tmux。"
+                    exit 1
+                fi
+                ;;
+            Linux*)
+                if [ -f /etc/debian_version ]; then
+                    print_info "检测到 Debian/Ubuntu，使用 apt-get 安装 tmux..."
+                    sudo apt-get update && sudo apt-get install -y tmux
+                elif [ -f /etc/redhat-release ]; then
+                    print_info "检测到 RHEL/CentOS，使用 yum/dnf 安装 tmux..."
+                    if command -v dnf &> /dev/null; then
+                        sudo dnf install -y tmux
+                    else
+                        sudo yum install -y tmux
+                    fi
+                else
+                     print_error "无法确定 Linux 发行版，请手动安装 tmux。"
+                     exit 1
+                fi
+                ;;
+            *)
+                print_error "不支持的操作系统: ${OS}，请手动安装 tmux。"
+                exit 1
+                ;;
+        esac
+
+        # 再次检查是否安装成功
+        if ! command -v tmux &> /dev/null; then
+             print_error "tmux 安装失败，请检查错误日志并重试。"
+             exit 1
+        else
+             print_success "tmux 安装成功: $(tmux -V)"
+        fi
     else
         print_info "检测到 tmux: $(tmux -V)"
     fi
@@ -87,8 +116,24 @@ install_global() {
     cd cc-power && npm link cc-power-mcp && npm link && cd ..
 }
 
-# 验证安装结果
-# 检查命令是否可以在全局 PATH 中找到并打印版本号
+# 配置 MCP 服务器
+configure_mcp() {
+    print_info "正在配置 Claude MCP..."
+    
+    # 检查是否已经存在
+    if claude mcp list 2>&1 | grep -q "cc-power-mcp"; then
+        print_info "发现已存在的 cc-power-mcp 配置，正在更新..."
+        claude mcp remove "cc-power-mcp" > /dev/null 2>&1 || true
+    fi
+
+    # 尝试添加 MCP
+    if claude mcp add "cc-power-mcp" -- "ccpower" start --stdio > /dev/null 2>&1; then
+        print_success "Claude MCP 配置成功！"
+    else
+        print_warning "Claude MCP 配置失败。可能是 'claude' 命令不可用，或者需要手动配置。"
+        print_info "你可以手动运行: claude mcp add cc-power-mcp -- ccpower start --stdio"
+    fi
+}
 verify_installation() {
     if command -v "$CLI_NAME" &> /dev/null; then
         print_success "${CLI_NAME} 已安装: $(which "$CLI_NAME")"
@@ -113,27 +158,16 @@ main() {
     
     build_project
     install_global
+    configure_mcp
     verify_installation
     
     echo ""
     print_success "开发者配置完成！"
     echo ""
-    
-    read -p "是否为项目配置 MCP? [y/N] (直接回车退出): " setup_mcp_choice
-    if [[ "$setup_mcp_choice" =~ ^[Yy]$ ]]; then
-        read -p "请输入项目目录路径: " project_path
-        if [ -n "$project_path" ]; then
-            if [ -f "./setup-project-mcp.sh" ]; then
-                bash ./setup-project-mcp.sh "$project_path"
-            else
-                print_error "找不到 setup-project-mcp.sh 脚本"
-            fi
-        else
-            print_warning "未输入路径，退出配置。"
-        fi
-    else
-        print_info "已退出。"
-    fi
+    print_info "使用方法:"
+    echo "  1. 进入你的项目目录"
+    echo "  2. 运行 ccpower init (如果还没有配置文件)"
+    echo "  3. 运行 ccpower run ."
     echo ""
 }
 

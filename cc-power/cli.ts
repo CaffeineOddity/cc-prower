@@ -10,9 +10,8 @@ import { MessageLogger } from './core/message-logger.js';
 import { MCPServer } from 'cc-power-mcp';
 import chokidar from 'chokidar';
 
-const CLI_NAME = 'cc-power';
+const CLI_NAME = 'ccpower';
 const CLI_VERSION = '1.0.0';
-const DEFAULT_CONFIG_FILE = './config.yaml';
 
 const program = new Command();
 
@@ -33,7 +32,7 @@ program
 program
   .command('init')
   .description('Initialize a new project config')
-  .argument('[name]', 'Project name', 'default')
+  .argument('[name]', 'Project name or path', '.')
   .option('-p, --provider <type>', 'Provider type', 'feishu')
   .action(async (name, options) => {
     await initProject(name, options);
@@ -52,9 +51,73 @@ program
   .description('Run a project in a managed tmux session with Claude Code')
   .argument('<path>', 'Path to project directory')
   .option('-s, --session <name>', 'Custom tmux session name')
-  .option('--dangerously-skip-permissions', 'Skip permission checks (dangerous)')
-  .action(async (projectPath, options) => {
-    await runProject(projectPath, options);
+  .allowUnknownOption(true) // 允许未知的选项，这样可以把参数透传给 claude
+  .action(async (projectPath, options, command) => {
+    // 找到 run 之后的参数
+    const rawArgs = process.argv.slice(2);
+    const runIndex = rawArgs.findIndex(arg => arg === 'run');
+    let claudeArgs: string[] = [];
+    
+    // 我们也需要自己重新解析 session name，防止 commander 解析错误
+    let actualSessionName = options.session;
+    
+    if (runIndex !== -1) {
+      const afterRun = rawArgs.slice(runIndex + 1);
+      let skipNext = false;
+      
+      // 我们检查一下如果是 "-skip-ask" 这种被 commander 误解析的
+      // 我们应该把 actualSessionName 恢复为 undefined (如果它原本就是错的)
+      if (options.session === 'kip-ask' && afterRun.includes('-skip-ask')) {
+        actualSessionName = undefined;
+      }
+      
+      claudeArgs = afterRun.filter((arg, i) => {
+        if (skipNext) {
+          skipNext = false;
+          return false;
+        }
+        if (arg === projectPath) return false;
+        
+        // 只有在明确是 -s 或 --session 且下一个参数存在时，才跳过
+        if (arg === '-s' || arg === '--session') {
+          // 这里说明用户确实想指定 session，我们从原始参数里取
+          if (i + 1 < afterRun.length) {
+            actualSessionName = afterRun[i + 1];
+            skipNext = true;
+          }
+          return false;
+        }
+        
+        // 其他的如果是类似 --session=xxx 的格式
+        if (arg.startsWith('--session=')) {
+          actualSessionName = arg.split('=')[1];
+          return false;
+        }
+
+        return true;
+      }).map(arg => {
+        // 将 -skip-ask 替换为 claude 实际需要的参数
+        if (arg === '-skip-ask') {
+          return '--dangerously-skip-permissions';
+        }
+        return arg;
+      });
+    }
+
+    const finalOptions = {
+      ...options,
+      session: actualSessionName
+    };
+
+    await runProject(projectPath, finalOptions, claudeArgs);
+  });
+
+program
+  .command('uninstall')
+  .description('Uninstall cc-power and remove all related files')
+  .option('-y, --yes', 'Skip confirmation prompt')
+  .action(async (options) => {
+    await uninstallCCPower(options);
   });
 
 program
@@ -85,7 +148,9 @@ program.parse();
 async function startService(options: any) {
   const { config: configPath, stdio: forceStdio } = options;
 
-  console.log(`Starting ${CLI_NAME}...`);
+  if (!forceStdio) {
+    console.log(`Starting ${CLI_NAME}...`);
+  }
 
   // 加载配置
   const actualConfigPath = configPath;
@@ -230,11 +295,13 @@ async function startService(options: any) {
 
   // 根据传输方式启动
   if (transportMode === 'http') {
-    console.log(`${CLI_NAME} does not support HTTP mode anymore. Using stdio mode.`);
+    if (!forceStdio) console.log(`${CLI_NAME} does not support HTTP mode anymore. Using stdio mode.`);
   }
 
-  console.log(`${CLI_NAME} is ready. Projects will be registered when clients connect via MCP.`);
-  console.log('Press Ctrl+C to stop the server.\n');
+  if (!forceStdio) {
+    console.log(`${CLI_NAME} is ready. Projects will be registered when clients connect via MCP.`);
+    console.log('Press Ctrl+C to stop the server.\n');
+  }
 
   await mcpServer.startStdio();
 
@@ -270,70 +337,45 @@ async function startService(options: any) {
 async function initProject(name: string, options: any) {
   const { provider } = options;
 
-  console.log(`Initializing project "${name}" with provider: ${provider}`);
+  let projectDir: string;
+  let projectName: string;
 
-  const projectsDir = './projects';
-  await fs.mkdir(projectsDir, { recursive: true });
+  // 检查 name 是否看起来像一个路径（以 . 或 / 开头，或者是绝对路径）
+  if (path.isAbsolute(name) || name.startsWith('./') || name.startsWith('../') || name === '.') {
+    projectDir = path.resolve(name);
+    projectName = path.basename(projectDir);
+  } else {
+    // 默认在 ./projects/ 下创建
+    const projectsDir = './projects';
+    await fs.mkdir(projectsDir, { recursive: true });
+    projectDir = path.join(projectsDir, name);
+    projectName = name;
+  }
 
-  const projectDir = path.join(projectsDir, name);
+  console.log(`Initializing project "${projectName}" in "${projectDir}" with provider: ${provider}`);
   await fs.mkdir(projectDir, { recursive: true });
 
-  const configPath = path.join(projectDir, 'config.yaml');
+  const configPath = path.join(projectDir, '.cc-power.yaml');
 
+  try {
+    await fs.access(configPath);
+    console.log(`Config file already exists at: ${configPath}`);
+    console.log('Initialization skipped to prevent overwriting.');
+    return;
+  } catch {
+    // File doesn't exist, proceed with creation
+  }
+
+  // 从 templates 目录读取配置模板
+  const templatePath = path.join(__dirname, 'providers', 'templates', `${provider}-template.yaml`);
   let configTemplate = '';
 
-  switch (provider) {
-    case 'feishu':
-      configTemplate = `provider: feishu
-
-feishu:
-  app_id: "cli_app_id_here"
-  app_secret: "your_app_secret_here"
-  bot_name: "Claude Bot"
-  allowed_users:
-    - "ou_user_id_1"
-    - "ou_user_id_2"
-
-session:
-  max_history: 50
-  timeout_minutes: 30
-`;
-      break;
-
-    case 'telegram':
-      configTemplate = `provider: telegram
-
-telegram:
-  bot_token: "your_bot_token_here"
-  allowed_chats:
-    - 123456789
-    - 987654321
-
-session:
-  max_history: 50
-  timeout_minutes: 30
-`;
-      break;
-
-    case 'whatsapp':
-      configTemplate = `provider: whatsapp
-
-whatsapp:
-  phone_number: "your_phone_number_id_here"
-  api_key: "your_api_key_here"
-  allowed_numbers:
-    - "+1234567890"
-    - "+0987654321"
-
-session:
-  max_history: 50
-  timeout_minutes: 30
-`;
-      break;
-
-    default:
-      console.error(`Unknown provider: ${provider}`);
-      process.exit(1);
+  try {
+    configTemplate = await fs.readFile(templatePath, 'utf-8');
+  } catch (error) {
+    console.error(`Unknown provider or template not found: ${provider}`);
+    console.error(`Expected template at: ${templatePath}`);
+    process.exit(1);
   }
 
   await fs.writeFile(configPath, configTemplate);
@@ -369,6 +411,139 @@ async function validateConfig(options: any) {
 }
 
 /**
+ * 卸载 cc-power 并移除所有相关文件
+ */
+async function uninstallCCPower(options: any) {
+  const { yes } = options;
+
+  console.log('Preparing to uninstall cc-power...');
+
+  if (!yes) {
+    const readline = await import('readline');
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout
+    });
+
+    const answer = await new Promise<string>((resolve) => {
+      rl.question('This will remove all cc-power files and configurations. Are you sure? (yes/no): ', (input) => {
+        resolve(input.toLowerCase());
+        rl.close();
+      });
+    });
+
+    if (answer !== 'yes' && answer !== 'y') {
+      console.log('Uninstall cancelled.');
+      return;
+    }
+  }
+
+  try {
+    // 关闭任何正在运行的 tmux 会话
+    console.log('Stopping any running cc-power tmux sessions...');
+
+    const { exec } = await import('child_process');
+    const { promisify } = await import('util');
+    const execAsync = promisify(exec);
+
+    try {
+      // 查找并终止所有 cc-power 相关的 tmux 会话
+      const sessionsResult = await execAsync('tmux list-sessions 2>/dev/null || true');
+      const sessions = sessionsResult.stdout.toString();
+
+      if (sessions.includes('cc-p-')) {
+        const sessionLines = sessions.split('\n');
+        for (const line of sessionLines) {
+          if (line.includes('cc-p-')) {
+            const sessionName = line.split(':')[0]; // 提取会话名
+            console.log(`Terminating tmux session: ${sessionName}`);
+            await execAsync(`tmux kill-session -t "${sessionName}" 2>/dev/null || true`);
+          }
+        }
+      }
+    } catch (tmuxError) {
+      console.warn('Could not manage tmux sessions:', tmuxError);
+    }
+
+    // 删除 .cc-power 目录及其所有内容
+    const ccPowerDir = path.join(process.env.HOME || '', '.cc-power');
+    try {
+      await fs.rm(ccPowerDir, { recursive: true, force: true });
+      console.log(`Removed directory: ${ccPowerDir}`);
+    } catch (error) {
+      console.warn(`Could not remove directory ${ccPowerDir}:`, error);
+    }
+
+    // 查找并删除可能存在的信号文件（如果在其他位置）
+    const signalFiles = [
+      path.join(process.cwd(), '.cc-power', 'signals'),
+      path.join(process.env.HOME || '', '.config', 'cc-power', 'signals'),
+    ];
+
+    for (const signalDir of signalFiles) {
+      try {
+        await fs.rm(signalDir, { recursive: true, force: true });
+        console.log(`Removed signal directory: ${signalDir}`);
+      } catch (error) {
+        // Ignore errors if these directories don't exist
+      }
+    }
+
+    // 删除项目中的 cc-power 配置文件（如果存在）
+    const projectConfigFiles = [
+      path.join(process.cwd(), '.cc-power.yaml'),
+      path.join(process.cwd(), 'config.yaml'), // only if it's a cc-power config
+    ];
+
+    for (const configFile of projectConfigFiles) {
+      try {
+        const stat = await fs.stat(configFile);
+        if (stat.isFile()) {
+          // Read the file to check if it's a cc-power config
+          const content = await fs.readFile(configFile, 'utf-8');
+          if (content.includes('cc-power') || content.includes('provider:') || content.includes('claude')) {
+            await fs.unlink(configFile);
+            console.log(`Removed project config: ${configFile}`);
+          }
+        }
+      } catch (error) {
+        // File doesn't exist, which is fine
+      }
+    }
+
+    // 删除可能的日志目录
+    const logDirs = [
+      path.join(process.cwd(), 'logs'),
+      path.join(process.cwd(), '.logs'),
+    ];
+
+    for (const logDir of logDirs) {
+      try {
+        // Only remove if it looks like a cc-power log directory
+        const logContents = await fs.readdir(logDir);
+        const hasCCPowerLogs = logContents.some(file =>
+          file.includes('cc-power') || file.includes('messages') || file.includes('claude')
+        );
+
+        if (hasCCPowerLogs) {
+          await fs.rm(logDir, { recursive: true, force: true });
+          console.log(`Removed log directory: ${logDir}`);
+        }
+      } catch (error) {
+        // Directory doesn't exist, which is fine
+      }
+    }
+
+    console.log('\nccpower has been uninstalled successfully.');
+    console.log('To completely remove it from your system, you may also want to run:');
+    console.log('  npm uninstall -g ccpower');
+  } catch (error) {
+    console.error('Error during uninstall:', error);
+    process.exit(1);
+  }
+}
+
+/**
  * 显示状态
  */
 async function showStatus(options: any) {
@@ -398,17 +573,17 @@ async function showStatus(options: any) {
 /**
  * 运行项目 (Tmux 模式)
  */
-async function runProject(projectPath: string, options: any) {
-  const { session, dangerouslySkipPermissions } = options;
+async function runProject(projectPath: string, options: any, claudeArgs: string[] = []) {
+  const { session } = options;
   const absProjectPath = path.resolve(projectPath);
   const projectName = path.basename(absProjectPath);
 
-  // 生成项目ID（使用项目绝对路径的MD5哈希前8位）
   const crypto = await import('crypto');
-  const projectId = crypto.createHash('md5').update(absProjectPath).digest('hex').substring(0, 8);
+  // 必须与 mcp 中的 inferProjectId 保持绝对一致的生成规则
+  const normalizedPath = path.resolve(absProjectPath).replace(/\/$/, '');
+  const projectId = crypto.createHash('md5').update(normalizedPath).digest('hex').substring(0, 8);
 
   const sessionName = session || `cc-p-${projectId}`;
-  const configManager = new ConfigManager();
 
   // 检查是否安装了 tmux
   try {
@@ -458,8 +633,8 @@ async function runProject(projectPath: string, options: any) {
 
     // 构建 claude 命令
     let claudeCmd = 'claude';
-    if (dangerouslySkipPermissions) {
-      claudeCmd += ' --dangerously-skip-permissions';
+    if (claudeArgs && claudeArgs.length > 0) {
+      claudeCmd += ' ' + claudeArgs.join(' ');
     }
 
     // 启动新 session，并进入项目目录运行 claude
@@ -545,6 +720,20 @@ async function recordProjectHistory(projectId: string, projectPath: string, conf
 
   // Import required modules for atomic write and locking
   const { default: writeFileAtomic } = await import('write-file-atomic');
+
+  // 先确保文件存在，如果不存在则创建一个空的
+  try {
+    await fs.access(historyPath); // 检查文件是否存在
+  } catch (accessError: any) {
+    if (accessError.code === 'ENOENT') {
+      // 文件不存在，创建一个空的历史记录
+      await writeFileAtomic(historyPath, JSON.stringify({}, null, 2));
+      console.log(`Created new project history file: ${historyPath}`);
+    } else {
+      throw accessError; // 其他错误直接抛出
+    }
+  }
+
   const { lock, unlock } = await import('proper-lockfile');
 
   // Acquire a lock before reading/writing the file
@@ -561,8 +750,19 @@ async function recordProjectHistory(projectId: string, projectPath: string, conf
     try {
       const content = await fs.readFile(historyPath, 'utf-8');
       history = JSON.parse(content);
-    } catch (error) {
+    } catch (error: any) {
       // File doesn't exist or is malformed, start with empty object
+      if (error.code === 'ENOENT') {
+        // File doesn't exist, create it with empty history
+        history = {};
+        // Write the initial empty history file
+        await writeFileAtomic(historyPath, JSON.stringify(history, null, 2));
+        console.log(`Created new project history file: ${historyPath}`);
+      } else {
+        // Some other error occurred while parsing, start with empty history
+        console.warn(`Failed to parse project history file, starting with empty history:`, error);
+        history = {};
+      }
     }
 
     history[projectId] = {

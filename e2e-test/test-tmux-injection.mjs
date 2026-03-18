@@ -173,7 +173,7 @@ async function testTC021(logger, router) {
     console.log('  ✓ Project history file created');
     console.log('  ✓ Dormant project simulated');
     console.log('  ✓ Wake-up mechanism triggered when message received');
-    console.log('  ✓ System prepared to restart project via cc-power run');
+    console.log('  ✓ System prepared to restart project via ccpower run');
 
     // Cleanup
     try {

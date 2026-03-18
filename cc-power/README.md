@@ -9,7 +9,7 @@
 ```bash
 npm install
 npm run build
-npm link  # 全局安装 cc-power 命令
+npm link  # 全局安装 ccpower 命令
 ```
 
 ### 2. 配置全局服务
@@ -61,7 +61,7 @@ EOF
 
 ```bash
 cd /path/to/cc-power
-cc-power start
+ccpower start
 ```
 
 **终端2（运行 Claude Code）：**

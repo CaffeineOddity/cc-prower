@@ -19,20 +19,39 @@ export class ConfigManager implements IConfigManager {
    * 加载全局配置
    */
   async load(configPath: string): Promise<GlobalConfig> {
+    let config: Partial<GlobalConfig> = {};
     try {
       const content = await fs.readFile(configPath, 'utf-8');
-      const config = yaml.parse(content) as GlobalConfig;
-
-      // 设置默认值
-      config.mcp = config.mcp || { transport: 'stdio', port: 8080 };
-      config.logging = config.logging || { level: 'info' };
-      config.providers = config.providers || {};
-
-      this.globalConfig = config;
-      return config;
-    } catch (error) {
-      throw new Error(`Failed to load config from ${configPath}: ${error}`);
+      config = yaml.parse(content) as Partial<GlobalConfig> || {};
+    } catch (error: any) {
+      if (error.code === 'ENOENT') {
+        // If file doesn't exist, try ~/.cc-power/config.yaml or use defaults
+        const homeDir = process.env.HOME || '';
+        const homeConfigPath = path.join(homeDir, '.cc-power', 'config.yaml');
+        try {
+          const content = await fs.readFile(homeConfigPath, 'utf-8');
+          config = yaml.parse(content) as Partial<GlobalConfig> || {};
+        } catch (homeError: any) {
+          if (homeError.code !== 'ENOENT') {
+            throw new Error(`Failed to load config from ${homeConfigPath}: ${homeError}`);
+          }
+          // Both paths failed with ENOENT, proceed with defaults
+          console.warn(`Global config not found at ${configPath} or ${homeConfigPath}, using default configuration.`);
+        }
+      } else {
+        throw new Error(`Failed to load config from ${configPath}: ${error}`);
+      }
     }
+
+    // 设置默认值
+    const finalConfig: GlobalConfig = {
+      mcp: config.mcp || { transport: 'stdio', port: 8080 },
+      logging: config.logging || { level: 'info' },
+      providers: config.providers || { feishu: { enabled: true } }
+    };
+
+    this.globalConfig = finalConfig;
+    return finalConfig;
   }
 
   /**

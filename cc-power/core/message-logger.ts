@@ -268,15 +268,21 @@ export class MessageLogger {
    */
   watch(projectId: string, callback: (entry: MessageLogEntry) => void): () => void {
     let logs = this.projectLogs.get(projectId) || [];
-    const initialLength = logs.length;
+    let lastLength = logs.length;
 
     // 轮询检查新消息
     const interval = setInterval(() => {
       const currentLogs = this.projectLogs.get(projectId) || [];
-      const newLogs = currentLogs.slice(initialLength);
+      if (currentLogs.length > lastLength) {
+        const newLogs = currentLogs.slice(lastLength);
+        lastLength = currentLogs.length;
 
-      for (const entry of newLogs) {
-        callback(entry);
+        for (const entry of newLogs) {
+          callback(entry);
+        }
+      } else if (currentLogs.length < lastLength) {
+        // Handle array rotation (if maxEntriesPerProject is exceeded)
+        lastLength = currentLogs.length;
       }
     }, 1000);
 

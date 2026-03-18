@@ -313,6 +313,31 @@ export class MCPServer {
   }
 
   /**
+   * 尝试从当前目录推断 Project ID
+   */
+  private async inferProjectId(): Promise<string | undefined> {
+    try {
+      const cwd = process.cwd();
+      // 检查当前目录下是否有项目配置文件，避免在非项目目录下误判
+      const hasConfig = fs.existsSync(path.join(cwd, '.cc-power.yaml')) || 
+                        fs.existsSync(path.join(cwd, 'config.yaml'));
+      
+      if (!hasConfig) {
+        return undefined;
+      }
+
+      const crypto = await import('crypto');
+      // 必须与 cli 中的生成规则保持绝对一致，使用 path.resolve
+      const normalizedPath = path.resolve(cwd).replace(/\/$/, '');
+      const projectId = crypto.createHash('md5').update(normalizedPath).digest('hex').substring(0, 8);
+      return projectId;
+    } catch (error) {
+      this.backend.logWarn('Failed to infer project ID from CWD:', error);
+      return undefined;
+    }
+  }
+
+  /**
    * 处理 send_message 工具
    */
   private async sendMessage(args: {
@@ -321,6 +346,13 @@ export class MCPServer {
     content: string;
     project_id?: string;
   }): Promise<any> {
+    if (!args.project_id) {
+      args.project_id = await this.inferProjectId();
+      if (args.project_id) {
+        this.backend.logInfo(`Auto-inferred project ID for sendMessage: ${args.project_id}`);
+      }
+    }
+    
     await this.backend.sendMessage(args);
 
     return {
@@ -336,6 +368,12 @@ export class MCPServer {
     provider: string;
     project_id?: string;
   }): Promise<any> {
+    if (!args.project_id) {
+      args.project_id = await this.inferProjectId();
+      if (args.project_id) {
+        this.backend.logInfo(`Auto-inferred project ID for listChats: ${args.project_id}`);
+      }
+    }
     return await this.backend.listChats(args);
   }
 
@@ -423,6 +461,13 @@ export class MCPServer {
     project_id: string;
     since?: number;
   }): Promise<any> {
+    if (!args.project_id) {
+      args.project_id = (await this.inferProjectId()) || '';
+      if (args.project_id) {
+        this.backend.logInfo(`Auto-inferred project ID for getIncomingMessages: ${args.project_id}`);
+      }
+    }
+    
     const { project_id: projectId, since } = args;
 
     try {

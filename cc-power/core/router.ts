@@ -159,17 +159,52 @@ export class Router implements IRouter {
   }
 
   /**
-   * 确保项目已注册（按需加载）
-   * 注意：此方法已废弃，项目配置现在由客户端通过 MCP 直接传递
+   * 确保项目已注册，如果未注册则尝试从 CWD 加载
    */
   private async ensureProjectRegistered(projectId: string): Promise<IProvider | null> {
-    // 检查是否已注册
-    const existingProvider = this.providers.get(projectId);
-    if (existingProvider) {
-      return existingProvider;
+    if (this.providers.has(projectId)) {
+      return this.providers.get(projectId)!;
     }
 
-    // 现在项目配置由客户端通过 MCP 传递，不再从文件系统加载
+    // 如果没找到，尝试从 CWD 自动注册
+    try {
+      const cwd = process.cwd();
+      const crypto = await import('crypto');
+      const path = await import('path');
+      const fs = await import('fs/promises');
+      
+      const normalizedPath = path.resolve(cwd).replace(/\/$/, '');
+      const inferredProjectId = crypto.createHash('md5').update(normalizedPath).digest('hex').substring(0, 8);
+
+      if (projectId === inferredProjectId) {
+        // 尝试加载配置并注册
+        let projectConfig: any = null;
+        const configPaths = [
+          path.join(cwd, '.cc-power.yaml'),
+          path.join(cwd, 'config.yaml'),
+        ];
+
+        for (const candidate of configPaths) {
+          try {
+            const content = await fs.readFile(candidate, 'utf-8');
+            const yaml = await import('yaml');
+            projectConfig = yaml.parse(content);
+            break;
+          } catch (error) {
+            continue;
+          }
+        }
+
+        if (projectConfig && projectConfig.provider) {
+          this.logger.info(`Auto-registering project ${projectId} from CWD`);
+          await this.registerProject(projectId, projectConfig);
+          return this.providers.get(projectId) || null;
+        }
+      }
+    } catch (error) {
+      this.logger.error(`Failed to auto-register project ${projectId}:`, error);
+    }
+
     this.logger.warn(`Project ${projectId} not registered. Use register_project MCP tool to register.`);
     return null;
   }
@@ -202,10 +237,13 @@ export class Router implements IRouter {
     }
 
     // 构建 ProviderConfig
+    // 我们需要将特定的 provider 配置（例如 config.feishu）展开到顶层
+    const providerSpecificConfig = config[providerType] || {};
     const providerConfig: ProviderConfig = {
       type: providerType,
       projectId,
       ...config,
+      ...providerSpecificConfig,
     };
 
     // 存储 Provider first to indicate the project is registered
@@ -330,11 +368,6 @@ export class Router implements IRouter {
 
     this.incomingMessageQueue.set(message.projectId, queue);
 
-    // Check if project is registered; if not, trigger auto-wakeup
-    this.attemptAutoWakeup(message).catch(err => {
-      this.logger.error(`Failed to auto-wakeup project ${message.projectId}:`, err);
-    });
-
     // 基于 Tmux 的输入注入
     this.injectMessageViaTmux(message).catch(err => {
       this.logger.error(`Failed to inject message via Tmux for project ${message.projectId}:`, err);
@@ -417,24 +450,37 @@ export class Router implements IRouter {
       const { promisify } = await import('util');
       const execAsync = promisify(exec);
 
-      // 获取当前面板的活动程序
-      const paneInfoResult = await execAsync(`tmux list-panes -t ${tmuxPane} -F '#{pane_pid}:#{pane_current_command}' 2>/dev/null || true`);
+      // 获取所有面板的信息并找到匹配的
+      // -a 列表所有会话
+      // tmuxPane 格式如 cc-p-e35341e7:0
+      const paneInfoResult = await execAsync(`tmux list-panes -a -F '#{session_name}:#{window_index} #{pane_pid}:#{pane_current_command}' 2>/dev/null || true`);
       const paneInfo = paneInfoResult.stdout.toString().trim();
 
       // 提取当前命令（通常是前台进程名）
       const lines = paneInfo.split('\n');
-      const currentCommandLine = lines.find(line => line.includes(tmuxPane.split(':')[1])); // Match the specific pane
+      const currentCommandLine = lines.find(line => line.startsWith(tmuxPane));
 
       if (currentCommandLine) {
-        const currentCommand = currentCommandLine.split(':')[1]?.toLowerCase() || '';
+        // currentCommandLine 类似: cc-p-e35341e7:0 96915:node
+        const parts = currentCommandLine.split(' ');
+        if (parts.length > 1) {
+          const currentCommand = parts[1].split(':')[1]?.toLowerCase() || '';
 
-        // 仅当当前进程是 Claude 或 Node 时才允许注入
-        if (!['claude', 'node', 'bash', 'zsh', 'sh'].includes(currentCommand.trim())) {
-          this.logger.warn(`Unsafe process detected in tmux pane ${tmuxPane}. Current command: ${currentCommand}. Injection paused for safety.`);
+          // node 环境运行的可能是 claude，所以我们需要包含 node
+          // 在 Claude Code 运行时，某些系统的 pane_current_command 会直接返回 Claude 的版本号（例如 '2.1.78'）
+          // 因此我们使用正则来匹配类似数字开头的版本号格式
+          const isClaudeVersion = /^\d+\.\d+\.\d+/.test(currentCommand.trim());
+          
+          if (!['claude', 'node', 'bash', 'zsh', 'sh'].includes(currentCommand.trim()) && !isClaudeVersion) {
+            this.logger.warn(`Unsafe process detected in tmux pane ${tmuxPane}. Current command: ${currentCommand}. Injection paused for safety.`);
+            return;
+          }
+
+          this.logger.debug(`Safe process check passed for tmux pane ${tmuxPane}. Current command: ${currentCommand}`);
+        } else {
+          this.logger.warn(`Could not parse process info in tmux pane ${tmuxPane}: ${currentCommandLine}`);
           return;
         }
-
-        this.logger.debug(`Safe process check passed for tmux pane ${tmuxPane}. Current command: ${currentCommand}`);
       } else {
         // If we can't determine the process, default to safe behavior
         this.logger.warn(`Could not determine current process in tmux pane ${tmuxPane}, defaulting to safe mode. Injection paused.`);
@@ -450,7 +496,8 @@ export class Router implements IRouter {
 
     // 构建注入的 prompt。告诉 Claude Code 处理新消息并调用 send_message 回传结果
     // 根据 TODO 第3节要求，添加系统级指令强制闭环
-    const prompt = `[来自 ${message.provider} 的新消息] 用户: ${message.userName || message.userId} 内容: ${content}\n请处理此消息，并在完成后务必调用 send_message 工具将结果发回给 chat_id: ${message.chatId}.`;
+    // [来自 ${message.provider} 的新消息] 用户: ${message.userName || message.userId} 内容:
+    const prompt = ` ${content}\n 处理完成后，务必调用'send_message'工具将结果发回给 chat_id: ${message.chatId}.`;
 
     this.logger.info(`Injecting message to tmux pane ${tmuxPane} for project ${message.projectId}`);
 
@@ -633,12 +680,13 @@ export class Router implements IRouter {
       }
 
       // 获取当前项目在队列中的待处理消息数
-      const queue = this.incomingMessageQueue.get(projectId) || [];
+      const queueLength = this.incomingMessageQueue.get(projectId)?.length || 0;
 
       status[projectId] = {
         provider: provName,
-        healthy: prov.isHealthy(),
-        pendingMessages: queue.length,
+        connected: true, // Assuming true if it's in the providers map
+        queueLength,
+        tmuxPane: this.projectTmuxSessions.get(projectId),
       };
     }
 
@@ -784,86 +832,5 @@ export class Router implements IRouter {
     this.incomingMessageQueue.set(projectId, []);
 
     return messages;
-  }
-
-
-  /**
-   * 尝试自动唤醒项目（当收到未注册项目的消息时）
-   */
-  private async attemptAutoWakeup(message: IncomingMessage): Promise<boolean> {
-    // 检查项目是否已注册
-    const isRegistered = this.providers.has(message.projectId);
-    if (isRegistered) {
-      return true; // 项目已注册，无需唤醒
-    }
-
-    this.logger.info(`Attempting to auto-wake up unregistered project: ${message.projectId}`);
-
-    try {
-      // 读取项目历史记录
-      const projectHistory = await this.readProjectHistory();
-      const projectRecord = projectHistory[message.projectId];
-
-      if (!projectRecord) {
-        this.logger.warn(`No project history found for project ID: ${message.projectId}`);
-        return false;
-      }
-
-      // 启动项目
-      const success = await this.wakeUpProject(message.projectId, projectRecord);
-      if (success) {
-        this.logger.info(`Successfully auto-waked up project: ${message.projectId}`);
-        return true;
-      } else {
-        this.logger.error(`Failed to auto-wake up project: ${message.projectId}`);
-        return false;
-      }
-    } catch (error) {
-      this.logger.error(`Error during auto-wake up for project ${message.projectId}:`, error);
-      return false;
-    }
-  }
-
-  /**
-   * 读取项目历史记录
-   */
-  private async readProjectHistory(): Promise<any> {
-    const cacheDir = path.join(process.env.HOME || '', '.cc-power', 'cache');
-    const historyPath = path.join(cacheDir, 'project_history.json');
-
-    try {
-      const content = await fs.readFile(historyPath, 'utf-8');
-      return JSON.parse(content);
-    } catch (error) {
-      this.logger.warn(`Could not read project history from ${historyPath}:`, error);
-      return {};
-    }
-  }
-
-  /**
-   * 唤醒项目
-   */
-  private async wakeUpProject(projectId: string, projectRecord: any): Promise<boolean> {
-    try {
-      // 在后台执行 cc-power run 命令
-      const { spawn } = await import('child_process');
-
-      // 使用当前 Node.js 进程的执行路径动态启动，而不是硬编码 npx
-      const runProcess = spawn(
-        process.execPath,
-        [process.argv[1], 'run', projectRecord.projectPath, '--session', projectRecord.sessionName],
-        {
-          detached: true,  // 分离进程，使其独立运行
-          stdio: 'ignore'  // 忽略输入输出，不干扰当前进程
-        }
-      );
-
-      // 不等待子进程结束，立即返回成功
-      runProcess.unref(); // 使父进程不必等待子进程
-      return true;
-    } catch (error) {
-      this.logger.error(`Failed to wake up project ${projectId}:`, error);
-      return false;
-    }
   }
 }

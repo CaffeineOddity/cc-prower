@@ -11,6 +11,7 @@ End-to-end tests for CC-Power MCP server.
 | test-auto-discovery.mjs | 自动发现测试 (2项) | 30s |
 | test-send-message.mjs | 消息发送测试 | 30s |
 | test-heartbeat-timeout-fast.mjs | 心跳超时测试 | 90s |
+| test-feishu-multi-project.mjs | 飞书多项目 Bot 测试 (3项) | 30s |
 
 ## 运行测试
 
@@ -28,6 +29,7 @@ npx tsx e2e-test/test-core.mjs
 npx tsx e2e-test/test-auto-discovery.mjs
 npx tsx e2e-test/test-send-message.mjs
 npx tsx e2e-test/test-heartbeat-timeout-fast.mjs
+npx tsx e2e-test/test-feishu-multi-project.mjs
 ```
 
 ## 测试覆盖
@@ -53,6 +55,12 @@ npx tsx e2e-test/test-heartbeat-timeout-fast.mjs
 
 ### test-heartbeat-timeout-fast.mjs
 - 心跳超时清理 (TC-007)
+
+### test-feishu-multi-project.mjs
+- 飞书多项目 Bot 测试 (TC-FS-001/002/003)
+  - 场景1: 相同 app_id，不同 chat_id
+  - 场景2: 不同 app_id，相同 chat_id，优先级
+  - 场景3: 关键词过滤
 
 ## 注意事项
 
