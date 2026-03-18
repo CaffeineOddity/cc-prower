@@ -256,11 +256,14 @@ export class Router implements IRouter {
 
     // Try to connect to the provider but don't let connection errors prevent registration
     try {
+      this.logger.info(`Attempting to connect provider for project ${projectId}...`);
       await providerInstance.connect(providerConfig);
+      this.logger.info(`Provider connection successful for project ${projectId}`);
       this.logger.info(`Project ${projectId} registered successfully`);
     } catch (connectionError) {
       const errorMessage = connectionError instanceof Error ? connectionError.message : String(connectionError);
       this.logger.error(`Failed to connect to provider for project ${projectId}: ${errorMessage}`);
+      this.logger.error(`Stack: ${connectionError instanceof Error ? connectionError.stack : 'No stack'}`);
       // Still consider the registration successful but with failed connection
       // This allows the project to be tracked even with connection issues
     }
@@ -495,8 +498,6 @@ export class Router implements IRouter {
     const content = message.content;
 
     // 构建注入的 prompt。告诉 Claude Code 处理新消息并调用 send_message 回传结果
-    // 根据 TODO 第3节要求，添加系统级指令强制闭环
-    // [来自 ${message.provider} 的新消息] 用户: ${message.userName || message.userId} 内容:
     const prompt = ` ${content}\n 处理完成后，务必调用'send_message'工具将结果发回给 chat_id: ${message.chatId}.`;
 
     this.logger.info(`Injecting message to tmux pane ${tmuxPane} for project ${message.projectId}`);

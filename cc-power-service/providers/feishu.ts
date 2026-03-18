@@ -42,7 +42,9 @@ export class FeishuProvider extends BaseProvider {
     });
 
     // 使用连接管理器获取 WebSocket 连接
+    this.logger.info(`Attempting to get or connect WebSocket for app_id: ${appId}`);
     const { client, eventDispatcher } = await this.connectionManager.getOrConnect(appId, appSecret);
+    this.logger.info(`WebSocket connection obtained for app_id: ${appId}`);
 
     // 注册 Provider 到路由表
     this.providerId = this.connectionManager.registerProvider(
@@ -55,6 +57,7 @@ export class FeishuProvider extends BaseProvider {
     );
 
     this.connected = true;
+    this.logger.info(`Feishu provider connected (chat_id: ${chatId}, priority: ${priority}${keyword ? `, keyword: ${keyword}` : ''})`);
     console.log(`Feishu provider connected (chat_id: ${chatId}, priority: ${priority}${keyword ? `, keyword: ${keyword}` : ''})`);
   }
 
