@@ -9,7 +9,7 @@ import { Logger } from '../core/logger.js';
  * 使用官方 SDK 建立 WebSocket 长连接接收消息
  */
 export class FeishuProvider extends BaseProvider {
-  private larkClient: lark.Client | null = null;
+  private apiClient: lark.Client | null = null;
   private connectionManager: FeishuConnectionManager;
   private providerId: string | null = null;
   private logger: Logger;
@@ -35,15 +35,10 @@ export class FeishuProvider extends BaseProvider {
       throw new Error('Feishu configuration missing chat_id');
     }
 
-    // Initialize Lark SDK Client for API calls
-    this.larkClient = new lark.Client({
-      appId,
-      appSecret,
-    });
-
-    // 使用连接管理器获取 WebSocket 连接
+    // 使用连接管理器获取 WebSocket 连接和 API Client
     this.logger.info(`Attempting to get or connect WebSocket for app_id: ${appId}`);
-    const { client, eventDispatcher } = await this.connectionManager.getOrConnect(appId, appSecret);
+    const { apiClient, eventDispatcher } = await this.connectionManager.getOrConnect(appId, appSecret);
+    this.apiClient = apiClient;
     this.logger.info(`WebSocket connection obtained for app_id: ${appId}`);
 
     // 注册 Provider 到路由表
@@ -65,14 +60,14 @@ export class FeishuProvider extends BaseProvider {
     if (this.userNameCache.has(userId)) {
       return this.userNameCache.get(userId)!;
     }
-    
-    if (this.larkClient && userId !== 'unknown') {
+
+    if (this.apiClient && userId !== 'unknown') {
       try {
-        const resp = await this.larkClient.contact.user.get({
+        const resp = await this.apiClient.contact.user.get({
           path: { user_id: userId },
           params: { user_id_type: 'open_id' }
         });
-        
+
         if (resp.code === 0 && resp.data?.user?.name) {
           const name = resp.data.user.name;
           this.userNameCache.set(userId, name);
@@ -82,7 +77,7 @@ export class FeishuProvider extends BaseProvider {
         this.logger.debug(`[Feishu] Failed to get user name for ${userId}, might lack permissions:`, (error as Error).message);
       }
     }
-    
+
     return 'Unknown';
   }
 
@@ -151,14 +146,14 @@ export class FeishuProvider extends BaseProvider {
   }
 
   async sendMessage(chatId: string, content: string): Promise<void> {
-    if (!this.larkClient) {
+    if (!this.apiClient) {
       throw new Error('Not authenticated');
     }
 
     try {
       this.logger.info(`[Feishu] Sending message to ${chatId}: ${content}`);
-      
-      const response = await this.larkClient.im.message.create({
+
+      const response = await this.apiClient.im.message.create({
         params: {
           receive_id_type: 'chat_id',
         },
@@ -183,7 +178,7 @@ export class FeishuProvider extends BaseProvider {
       this.providerId = null;
     }
     this.connected = false;
-    this.larkClient = null;
+    this.apiClient = null;
     super.disconnect();
     this.logger.info('[Feishu] Disconnected');
   }
