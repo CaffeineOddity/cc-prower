@@ -12,7 +12,7 @@ mcp:
 logging:
   level: "info"
   # 可选: 日志文件路径
-  # file: "./logs/cc-power.log"
+  file: "~/.cc-power/tmp/logs/cc-power.log"
 
 # Provider 配置（仅用于启用/禁用，具体配置由客户端项目提供）
 providers:

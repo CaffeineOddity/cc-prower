@@ -16,8 +16,9 @@
     "resolveJsonModule": true,
     "allowSyntheticDefaultImports": true,
     "types": ["node"],
+    "baseUrl": ".",
     "paths": {
-      "cc-power-mcp": ["../cc-power-mcp/src"]
+      "cc-power-mcp": ["../cc-power-mcp/dist"]  // 指向编译后的文件而不是源码
     }
   },
   "include": [
@@ -25,6 +26,7 @@
   ],
   "exclude": [
     "node_modules",
-    "dist"
+    "dist",
+    "tests"
   ]
 }

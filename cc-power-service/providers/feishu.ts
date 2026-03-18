@@ -58,7 +58,7 @@ export class FeishuProvider extends BaseProvider {
 
     this.connected = true;
     this.logger.info(`Feishu provider connected (chat_id: ${chatId}, priority: ${priority}${keyword ? `, keyword: ${keyword}` : ''})`);
-    console.log(`Feishu provider connected (chat_id: ${chatId}, priority: ${priority}${keyword ? `, keyword: ${keyword}` : ''})`);
+    this.logger.info(`Feishu provider connected (chat_id: ${chatId}, priority: ${priority}${keyword ? `, keyword: ${keyword}` : ''})`);
   }
 
   private async getUserName(userId: string): Promise<string> {
@@ -79,7 +79,7 @@ export class FeishuProvider extends BaseProvider {
           return name;
         }
       } catch (error) {
-        console.debug(`[Feishu] Failed to get user name for ${userId}, might lack permissions:`, (error as Error).message);
+        this.logger.debug(`[Feishu] Failed to get user name for ${userId}, might lack permissions:`, (error as Error).message);
       }
     }
     
@@ -91,10 +91,10 @@ export class FeishuProvider extends BaseProvider {
     const sender = data.sender;
     
     if (message && (message.msg_type === 'text' || message.message_type === 'text')) {
-      console.log(`handleIncomingMessage: ${data}`);
+      this.logger.info(`handleIncomingMessage: ${data}`);
       this.handleIncomingMessage(message, sender);
     } else {
-        console.log(`[Feishu] Ignoring non-text message: ${JSON.stringify(message)}`);
+        this.logger.info(`[Feishu] Ignoring non-text message: ${JSON.stringify(message)}`);
     }
   }
 
@@ -125,7 +125,7 @@ export class FeishuProvider extends BaseProvider {
       const userId = senderId.open_id || senderId.union_id || 'unknown';
       
       const senderName = await this.getUserName(userId);
-      console.log(`[Feishu] Received message from ${senderName}: ${textContent}`);
+      this.logger.info(`[Feishu] Received message from ${senderName}: ${textContent}`);
 
       const incomingMessage: IncomingMessage = {
         type: 'incoming',
@@ -146,7 +146,7 @@ export class FeishuProvider extends BaseProvider {
         this.messageCallback(incomingMessage);
       }
     } catch (error) {
-      console.error('Error handling incoming message:', error);
+      this.logger.error('Error handling incoming message:', error);
     }
   }
 
@@ -156,7 +156,7 @@ export class FeishuProvider extends BaseProvider {
     }
 
     try {
-      console.log(`[Feishu] Sending message to ${chatId}: ${content}`);
+      this.logger.info(`[Feishu] Sending message to ${chatId}: ${content}`);
       
       const response = await this.larkClient.im.message.create({
         params: {
@@ -168,12 +168,11 @@ export class FeishuProvider extends BaseProvider {
           content: JSON.stringify({ text: content }),
         }
       });
-
       if (response.code !== 0) {
         throw new Error(`Failed to send message: ${response.msg}`);
       }
     } catch (error) {
-      console.error('Failed to send Feishu message:', error);
+      this.logger.error('Failed to send Feishu message:', error);
       throw error;
     }
   }
@@ -183,10 +182,10 @@ export class FeishuProvider extends BaseProvider {
       this.connectionManager.unregisterProvider(this.providerId);
       this.providerId = null;
     }
-
     this.connected = false;
     this.larkClient = null;
     super.disconnect();
+    this.logger.info('[Feishu] Disconnected');
   }
 }
 

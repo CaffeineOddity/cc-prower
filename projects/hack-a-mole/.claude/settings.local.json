@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "mcp__cc-power-mcp__send_message",
-      "mcp__cc-power-mcp__register_project"
-    ]
-  }
-}

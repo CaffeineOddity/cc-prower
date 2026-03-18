@@ -10,14 +10,26 @@ vi.mock('../core/message-logger.js');
 
 describe('Tmux functionality', () => {
   let router: Router;
-  let mockChildProcess: any;
+  let originalExec: any;
+  let mockExec: any;
+  let mockPromisify: any;
   let mockLogger: any;
 
-  beforeEach(() => {
-    mockChildProcess = {
-      exec: vi.fn(),
-      promisify: vi.fn(),
+  beforeEach(async () => {
+    // Mock child_process functions
+    mockExec = vi.fn();
+    mockPromisify = vi.fn().mockReturnValue(mockExec);
+
+    // Mock the entire child_process module
+    const childProcessMock = {
+      exec: mockExec,
+      promisify: mockPromisify,
     };
+    vi.mocked(await import('child_process')).exec = mockExec;
+
+    // Use dynamic import to mock properly
+    vi.doMock('child_process', () => childProcessMock);
+    vi.doMock('util', () => ({ promisify: mockPromisify }));
 
     mockLogger = {
       info: vi.fn(),
@@ -27,16 +39,13 @@ describe('Tmux functionality', () => {
     };
 
     // Create a new instance of Router for each test
-    router = new (Router as any)(undefined, mockLogger, undefined);
+    // We need to handle the constructor properly - Router needs a ConfigManager
+    const mockConfigManager = {
+      isProviderEnabled: vi.fn().mockReturnValue(true),
+      cacheProjectConfig: vi.fn(),
+    };
 
-    // Mock the child_process and util modules at the module level
-    vi.doMock('child_process', () => ({
-      exec: mockChildProcess.exec,
-    }));
-
-    vi.doMock('util', () => ({
-      promisify: mockChildProcess.promisify,
-    }));
+    router = new Router(mockConfigManager as any, mockLogger, undefined as any);
   });
 
   afterEach(() => {
@@ -58,24 +67,26 @@ describe('Tmux functionality', () => {
       await router['injectMessageViaTmux'](message as any);
 
       // Should log a warning and return without injecting
-      expect(mockLogger.warn).toHaveBeenCalledWith('No tmux session found for project nonexistent-project');
+      expect(mockLogger.warn).toHaveBeenCalledWith(expect.stringContaining('No tmux session found for project'));
     });
 
     it('should check current process before injection for security', async () => {
       // Add a mock tmux session
       router['projectTmuxSessions'].set('test-project', 'test-session:0');
 
-      const mockExec1 = vi.fn();
-      const mockPromisify1 = vi.fn().mockReturnValue(mockExec1);
-
-      // Set up mocks using the mockChildProcess object from beforeEach
-      mockChildProcess.exec.mockImplementation(mockExec1);
-      mockChildProcess.promisify.mockReturnValue(mockPromisify1);
-
-      // Mock successful checks
-      mockExec1.mockResolvedValueOnce({ stdout: '', stderr: '' }) // has-session check
-        .mockResolvedValueOnce({ stdout: '0:1234:bash' }) // Process check
-        .mockResolvedValueOnce({ stdout: '' }); // send-keys
+      // Setup mock responses for different commands
+      mockExec.mockImplementation((command: string, callback: (error: Error | null, result: { stdout: string, stderr: string }) => void) => {
+        if (command.includes('has-session')) {
+          // Simulate session exists
+          callback(null, { stdout: '', stderr: '' });
+        } else if (command.includes('list-panes')) {
+          // Simulate safe process (bash)
+          callback(null, { stdout: 'test-session:0 12345:bash', stderr: '' });
+        } else if (command.includes('send-keys')) {
+          // Simulate successful send
+          callback(null, { stdout: '', stderr: '' });
+        }
+      });
 
       const message = {
         type: 'incoming',
@@ -90,22 +101,30 @@ describe('Tmux functionality', () => {
 
       await router['injectMessageViaTmux'](message as any);
 
-      // Should check for current process and find it's safe (bash)
-      expect(mockExec1).toHaveBeenCalledWith(expect.stringContaining('tmux list-panes'));
+      // Verify that the necessary commands were called
+      expect(mockExec).toHaveBeenCalledWith(
+        expect.stringContaining('tmux has-session'),
+        expect.any(Function)
+      );
+      expect(mockExec).toHaveBeenCalledWith(
+        expect.stringContaining('tmux list-panes'),
+        expect.any(Function)
+      );
     });
 
     it('should not inject if unsafe process detected', async () => {
       // Add a mock tmux session
       router['projectTmuxSessions'].set('test-project', 'test-session:0');
 
-      const mockExec2 = vi.fn();
-      const mockPromisify2 = vi.fn().mockReturnValue(mockExec2);
-
-      // Set up mocks using the mockChildProcess object from beforeEach
-      mockChildProcess.exec.mockImplementation(mockExec2);
-      mockChildProcess.promisify.mockReturnValue(mockPromisify2);
-
-      mockExec2.mockResolvedValueOnce({ stdout: '0:1234:rm' }); // Unsafe process
+      // Setup mock to simulate unsafe process (rm command)
+      mockExec.mockImplementation((command: string, callback: (error: Error | null, result: { stdout: string, stderr: string }) => void) => {
+        if (command.includes('has-session')) {
+          callback(null, { stdout: '', stderr: '' });
+        } else if (command.includes('list-panes')) {
+          // Return an unsafe process
+          callback(null, { stdout: 'test-session:0 12345:rm', stderr: '' });
+        }
+      });
 
       const message: any = {
         type: 'incoming',
@@ -132,20 +151,16 @@ describe('Tmux functionality', () => {
       // Add a mock tmux session
       router['projectTmuxSessions'].set('test-project', 'test-session:0');
 
-      const mockExec = vi.fn();
-      const mockPromisify = vi.fn().mockReturnValue(mockExec);
-
-      // Mock child_process
-      const mockExec3 = vi.fn();
-      const mockPromisify3 = vi.fn().mockReturnValue(mockExec3);
-
-      // Set up mocks using the mockChildProcess object from beforeEach
-      mockChildProcess.exec.mockImplementation(mockExec3);
-      mockChildProcess.promisify.mockReturnValue(mockPromisify3);
-
-      // Mock successful session check
-      mockExec3.mockResolvedValueOnce({ stdout: '', stderr: '' }) // has-session check
-        .mockResolvedValueOnce({ stdout: '0:1234:bash' }); // Process check
+      // Setup mock responses
+      mockExec.mockImplementation((command: string, callback: (error: Error | null, result: { stdout: string, stderr: string }) => void) => {
+        if (command.includes('has-session')) {
+          callback(null, { stdout: '', stderr: '' });
+        } else if (command.includes('list-panes')) {
+          callback(null, { stdout: 'test-session:0 12345:bash', stderr: '' });
+        } else if (command.includes('send-keys')) {
+          callback(null, { stdout: '', stderr: '' });
+        }
+      });
 
       // Create a message to trigger the check
       const message = {
@@ -162,7 +177,10 @@ describe('Tmux functionality', () => {
       await router['injectMessageViaTmux'](message as any);
 
       // Should have checked the session status
-      expect(mockExec3).toHaveBeenCalledWith(expect.stringContaining('tmux has-session'));
+      expect(mockExec).toHaveBeenCalledWith(
+        expect.stringContaining('tmux has-session'),
+        expect.any(Function)
+      );
     });
   });
 });

@@ -1,3 +1,6 @@
+import { homedir } from 'os';
+import { resolve } from 'path';
+
 /**
  * 简单的日志器实现
  */
@@ -15,7 +18,15 @@ export class Logger {
 
   constructor(config: { level: LogLevel; file?: string }) {
     this.level = config.level;
-    this.file = config.file;
+    // 支持 ~ 路径展开
+    this.file = config.file ? this.expandHomeDir(config.file) : undefined;
+  }
+
+  private expandHomeDir(filePath: string): string {
+    if (filePath.startsWith('~/')) {
+      return resolve(homedir(), filePath.slice(2));
+    }
+    return filePath;
   }
 
   private shouldLog(level: LogLevel): boolean {

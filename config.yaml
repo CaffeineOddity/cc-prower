@@ -3,18 +3,19 @@
 # MCP 服务器配置
 mcp:
   # 传输方式: stdio 或 http
-  transport: "http"
+  transport: "stdio"
   # HTTP 模式下的端口（仅当 transport=http 时使用）
   port: 8888
   host: "127.0.0.1"
 
-# 项目配置目录
-projects_dir: "./projects"
 
-# 日志配置
+# 日志配置 包含的日志级别
+# - debug → 打印 debug、info、warn、error（所有日志）
+# - info → 打印 info、warn、error
+# - error → 只打印 error
 logging:
   level: "debug"
-  file: "./logs/cc-power.log"
+  file: "~/.cc-power/tmp/logs/cc-power.log"
 
 # Provider 配置
 providers:
