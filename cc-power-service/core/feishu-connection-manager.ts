@@ -20,6 +20,13 @@ interface WSConnection {
   eventDispatcher: lark.EventDispatcher;
   providers: Set<string>; // providerId set
   secret: string;
+  // 重连状态
+  reconnectAttempts: number;
+  reconnectTimer?: NodeJS.Timeout;
+  isReconnecting: boolean;
+  // 连接状态
+  connected: boolean;
+  lastActivity: number;
 }
 
 /**
@@ -41,8 +48,17 @@ export class FeishuConnectionManager {
   private logger: Logger;
   private nextProviderId = 0;
 
+  // 重连配置
+  private readonly MAX_RECONNECT_ATTEMPTS = 10;
+  private readonly INITIAL_RECONNECT_DELAY = 1000; // 1秒
+  private readonly MAX_RECONNECT_DELAY = 30000; // 30秒
+  private readonly HEARTBEAT_INTERVAL = 30000; // 30秒检查一次
+  private heartbeatTimer?: NodeJS.Timeout;
+
   private constructor(logger?: Logger) {
     this.logger = logger || new Logger({ level: 'info' });
+    // 启动心跳检测
+    this.startHeartbeat();
   }
 
   /**
@@ -53,6 +69,134 @@ export class FeishuConnectionManager {
       FeishuConnectionManager.instance = new FeishuConnectionManager(logger);
     }
     return FeishuConnectionManager.instance;
+  }
+
+  /**
+   * 计算重连延迟（指数退避）
+   */
+  private getReconnectDelay(attempts: number): number {
+    const delay = this.INITIAL_RECONNECT_DELAY * Math.pow(2, attempts);
+    return Math.min(delay, this.MAX_RECONNECT_DELAY);
+  }
+
+  /**
+   * 重连 WebSocket
+   */
+  private async reconnect(appId: string, appSecret: string): Promise<void> {
+    const connection = this.connections.get(appId);
+    if (!connection || connection.isReconnecting) {
+      return;
+    }
+
+    if (connection.reconnectAttempts >= this.MAX_RECONNECT_ATTEMPTS) {
+      this.logger.error(`Max reconnect attempts (${this.MAX_RECONNECT_ATTEMPTS}) reached for app_id: ${appId}`);
+      connection.isReconnecting = false;
+      return;
+    }
+
+    connection.isReconnecting = true;
+    connection.reconnectAttempts++;
+
+    const delay = this.getReconnectDelay(connection.reconnectAttempts - 1);
+    this.logger.info(`Attempting to reconnect ${appId} in ${delay}ms (attempt ${connection.reconnectAttempts}/${this.MAX_RECONNECT_ATTEMPTS})`);
+
+    connection.reconnectTimer = setTimeout(async () => {
+      try {
+        // 清理旧的连接
+        connection.client = null;
+
+        // 创建新的连接
+        const { client, eventDispatcher } = await this.createWebSocket(appId, appSecret);
+
+        // 更新连接信息
+        connection.client = client;
+        connection.eventDispatcher = eventDispatcher;
+        connection.reconnectAttempts = 0;
+        connection.isReconnecting = false;
+        connection.connected = true;
+        connection.lastActivity = Date.now();
+
+        this.logger.info(`Successfully reconnected to WebSocket for app_id: ${appId}`);
+      } catch (error) {
+        this.logger.error(`Reconnect attempt ${connection.reconnectAttempts} failed for app_id ${appId}:`, error);
+        connection.isReconnecting = false;
+        // 继续重连
+        this.reconnect(appId, appSecret);
+      }
+    }, delay);
+  }
+
+  /**
+   * 创建 WebSocket 连接
+   */
+  private async createWebSocket(appId: string, appSecret: string): Promise<{
+    client: lark.WSClient;
+    eventDispatcher: lark.EventDispatcher;
+  }> {
+    // 创建事件分发器
+    const eventDispatcher = new lark.EventDispatcher({}).register({
+      'im.message.receive_v1': async (data: any) => {
+        this.updateActivity(appId);
+        this.handleMessage(appId, data);
+        return {};
+      },
+    });
+
+    // 创建 WebSocket 客户端
+    const client = new lark.WSClient({
+      appId,
+      appSecret,
+      logger: {
+        trace: (msg) => console.log(`[Feishu WS ${appId}]`, msg),
+        debug: (msg) => console.log(`[Feishu WS ${appId}]`, msg),
+        info: (msg) => console.log(`[Feishu WS ${appId}]`, msg),
+        warn: (msg) => console.warn(`[Feishu WS ${appId}]`, msg),
+        error: (msg) => console.error(`[Feishu WS ${appId}]`, msg),
+      }
+    });
+
+    try {
+      client.start({ eventDispatcher });
+      this.logger.info(`WebSocket connection started for app_id: ${appId}`);
+    } catch (error) {
+      this.logger.error(`Failed to start WebSocket for app_id ${appId}:`, error);
+      throw error;
+    }
+
+    return { client, eventDispatcher };
+  }
+
+  /**
+   * 更新连接活动时间
+   */
+  private updateActivity(appId: string): void {
+    const connection = this.connections.get(appId);
+    if (connection) {
+      connection.lastActivity = Date.now();
+    }
+  }
+
+  /**
+   * 心跳检测
+   */
+  private startHeartbeat(): void {
+    this.heartbeatTimer = setInterval(() => {
+      const now = Date.now();
+      for (const [appId, connection] of this.connections) {
+        if (connection.providers.size === 0) {
+          continue; // 没有使用该连接的 provider，跳过
+        }
+
+        const idleTime = now - connection.lastActivity;
+        if (idleTime > this.HEARTBEAT_INTERVAL * 2) { // 超过2个周期没有活动
+          this.logger.warn(`Connection ${appId} appears idle (${idleTime}ms), checking status...`);
+          // 触发重连
+          this.reconnect(appId, connection.secret);
+        }
+      }
+    }, this.HEARTBEAT_INTERVAL);
+
+    this.logger.info('Heartbeat started');
   }
 
   /**
@@ -67,43 +211,25 @@ export class FeishuConnectionManager {
     if (!connection) {
       this.logger.info(`Creating new WebSocket connection for app_id: ${appId}`);
 
-      // 创建事件分发器
-      const eventDispatcher = new lark.EventDispatcher({}).register({
-        'im.message.receive_v1': async (data: any) => {
-          this.handleMessage(appId, data);
-          return {};
-        },
-      });
-
-      // 创建 WebSocket 客户端
-      const client = new lark.WSClient({
-        appId,
-        appSecret,
-        logger: {
-          trace: (msg) => console.log(`[Feishu WS ${appId}]`, msg),
-          debug: (msg) => console.log(`[Feishu WS ${appId}]`, msg),
-          info: (msg) => console.log(`[Feishu WS ${appId}]`, msg),
-          warn: (msg) => console.warn(`[Feishu WS ${appId}]`, msg),
-          error: (msg) => console.error(`[Feishu WS ${appId}]`, msg),
-        }
-      });
-
-      try {
-        client.start({ eventDispatcher });
-        this.logger.info(`WebSocket connection started for app_id: ${appId}`);
-      } catch (error) {
-        this.logger.error(`Failed to start WebSocket for app_id ${appId}:`, error);
-        throw error;
-      }
+      // 创建 WebSocket 连接
+      const { client, eventDispatcher } = await this.createWebSocket(appId, appSecret);
 
       connection = {
         client,
         eventDispatcher,
         providers: new Set(),
         secret: appSecret,
+        reconnectAttempts: 0,
+        isReconnecting: false,
+        connected: true,
+        lastActivity: Date.now(),
       };
 
       this.connections.set(appId, connection);
+    } else if (!connection.connected) {
+      // 连接已断开，尝试重连
+      this.logger.warn(`Connection ${appId} is disconnected, attempting reconnect...`);
+      await this.reconnect(appId, appSecret);
     }
 
     return {
@@ -267,8 +393,11 @@ export class FeishuConnectionManager {
 
     for (const [appId, connection] of this.connections) {
       status[appId] = {
-        connected: true,
+        connected: connection.connected,
         providerCount: connection.providers.size,
+        reconnectAttempts: connection.reconnectAttempts,
+        isReconnecting: connection.isReconnecting,
+        lastActivity: connection.lastActivity,
       };
     }
 
@@ -298,8 +427,18 @@ export class FeishuConnectionManager {
   cleanup(): void {
     this.logger.info('Cleaning up FeishuConnectionManager...');
 
+    // 清除心跳定时器
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = undefined;
+    }
+
     for (const [appId, connection] of this.connections) {
       try {
+        // 清除重连定时器
+        if (connection.reconnectTimer) {
+          clearTimeout(connection.reconnectTimer);
+        }
         connection.client = null;
         this.logger.info(`Closed connection for app_id: ${appId}`);
       } catch (error) {
