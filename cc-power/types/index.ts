@@ -1,6 +1,7 @@
 // 导出所有类型
 export * from './config.js';
 export * from './message.js';
+export * from './mcp.js';
 
 import {
   IncomingMessage,
@@ -11,6 +12,14 @@ import {
   ProjectConfig,
   ProviderConfig
 } from './config.js';
+
+import {
+  MCPRequest,
+  MCPCallRequest,
+  MCPResponse,
+  MCCToolCall,
+  MCCToolResult
+} from './mcp.js';
 
 // Provider 基类接口
 export interface IProvider {
@@ -26,7 +35,7 @@ export interface IRouter {
   registerProject(projectId: string, config: ProjectConfig): Promise<void>;
   unregisterProject(projectId: string): Promise<void>;
   route(message: IncomingMessage | OutgoingMessage): Promise<void>;
-  handleMCPMessage(message: any): Promise<void>;
+  handleMCPMessage(message: MCPRequest): Promise<void>;
   getProject(provider: string, chatId: string): string | null;
 }
 

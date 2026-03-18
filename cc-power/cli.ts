@@ -127,6 +127,7 @@ async function startService(options: any) {
       project_id?: string;
     }): Promise<any> {
       await router.handleMCPMessage({
+        jsonrpc: '2.0',
         method: 'tools/call',
         params: {
           name: 'send_message',
@@ -140,6 +141,7 @@ async function startService(options: any) {
       project_id?: string;
     }): Promise<any> {
       return await router.handleMCPMessage({
+        jsonrpc: '2.0',
         method: 'tools/call',
         params: {
           name: 'list_chats',
@@ -150,6 +152,7 @@ async function startService(options: any) {
 
     async getStatus(args: { provider?: string }): Promise<any> {
       return await router.handleMCPMessage({
+        jsonrpc: '2.0',
         method: 'tools/call',
         params: {
           name: 'get_status',
@@ -541,7 +544,7 @@ async function recordProjectHistory(projectId: string, projectPath: string, conf
   const historyPath = path.join(cacheDir, 'project_history.json');
 
   // Import required modules for atomic write and locking
-  const { writeFileAtomic } = await import('write-file-atomic');
+  const { default: writeFileAtomic } = await import('write-file-atomic');
   const { lock, unlock } = await import('proper-lockfile');
 
   // Acquire a lock before reading/writing the file
@@ -582,7 +585,7 @@ async function recordProjectHistory(projectId: string, projectPath: string, conf
     if (releaseLock) {
       try {
         await releaseLock();
-      } catch (lockError) {
+      } catch (lockError: any) {
         console.error('Failed to release lock:', lockError);
       }
     }

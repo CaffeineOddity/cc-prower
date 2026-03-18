@@ -6,6 +6,10 @@ import type {
   ProviderConfig,
   ProjectConfig,
   IProvider,
+  MCPRequest,
+  MCPCallRequest,
+  MCCToolCall,
+  MCCToolResult,
 } from '../types/index.js';
 
 import * as fs from 'fs/promises';
@@ -52,7 +56,7 @@ export class Router implements IRouter {
   private incomingMessageQueue = new Map<string, IncomingMessage[]>(); // projectId → messages
 
   // 队列最大长度限制（防止内存泄漏）
-  private readonly MAX_QUEUE_LENGTH = 50;
+  protected MAX_QUEUE_LENGTH = 50; // Changed from readonly to allow testing
 
   // 消息生存时间（毫秒），超过此时间的消息将被丢弃
   private readonly MESSAGE_TTL = 5 * 60 * 1000; // 5分钟
@@ -374,6 +378,9 @@ export class Router implements IRouter {
   /**
    * 基于 Tmux 的输入注入，反向驱动 Claude Code
    */
+  /**
+   * 基于 Tmux 的输入注入，反向驱动 Claude Code
+   */
   private async injectMessageViaTmux(message: IncomingMessage): Promise<void> {
     const tmuxPane = this.projectTmuxSessions.get(message.projectId);
     if (!tmuxPane) {
@@ -402,6 +409,41 @@ export class Router implements IRouter {
     } catch (error) {
       this.logger.error(`Failed to check tmux session status for ${tmuxPane}:`, error);
       // Continue with injection despite status check failure
+    }
+
+    // 防误触安全检查：检查当前前台进程是否为安全的 Claude 进程
+    try {
+      const { exec } = await import('child_process');
+      const { promisify } = await import('util');
+      const execAsync = promisify(exec);
+
+      // 获取当前面板的活动程序
+      const paneInfoResult = await execAsync(`tmux list-panes -t ${tmuxPane} -F '#{pane_pid}:#{pane_current_command}' 2>/dev/null || true`);
+      const paneInfo = paneInfoResult.stdout.toString().trim();
+
+      // 提取当前命令（通常是前台进程名）
+      const lines = paneInfo.split('\n');
+      const currentCommandLine = lines.find(line => line.includes(tmuxPane.split(':')[1])); // Match the specific pane
+
+      if (currentCommandLine) {
+        const currentCommand = currentCommandLine.split(':')[1]?.toLowerCase() || '';
+
+        // 仅当当前进程是 Claude 或 Node 时才允许注入
+        if (!['claude', 'node', 'bash', 'zsh', 'sh'].includes(currentCommand.trim())) {
+          this.logger.warn(`Unsafe process detected in tmux pane ${tmuxPane}. Current command: ${currentCommand}. Injection paused for safety.`);
+          return;
+        }
+
+        this.logger.debug(`Safe process check passed for tmux pane ${tmuxPane}. Current command: ${currentCommand}`);
+      } else {
+        // If we can't determine the process, default to safe behavior
+        this.logger.warn(`Could not determine current process in tmux pane ${tmuxPane}, defaulting to safe mode. Injection paused.`);
+        return;
+      }
+    } catch (error) {
+      this.logger.error(`Failed to check current process in tmux pane ${tmuxPane}:`, error);
+      // If we can't verify safety, don't inject for security
+      return;
     }
 
     const content = message.content;
@@ -443,14 +485,14 @@ export class Router implements IRouter {
   /**
    * 处理 MCP 消息
    */
-  async handleMCPMessage(message: any): Promise<void> {
+  async handleMCPMessage(message: MCPRequest): Promise<void> {
     this.logger.debug(`MCP message: ${JSON.stringify(message)}`);
 
     const { method, params } = message;
 
     switch (method) {
       case 'tools/call':
-        await this.handleToolCall(params as any);
+        await this.handleToolCall(params as MCPCallRequest['params']);
         break;
 
       default:

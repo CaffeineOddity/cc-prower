@@ -238,8 +238,11 @@ prepare_mcp_configuration() {
     return 0
 }
 
-configure_mcp_stdio() {
-    print_info "使用 STDIO 模式（当前唯一支持的模式）"
+configure_mcp_server() {
+    local project_path="$1"
+
+    echo ""
+    print_info "配置 MCP 服务器... (仅支持 STDIO 模式)"
 
     if ! prepare_mcp_configuration; then
         return 0
@@ -251,15 +254,6 @@ configure_mcp_stdio() {
     else
         print_error "MCP 服务器配置失败"
     fi
-}
-
-configure_mcp_server() {
-    local project_path="$1"
-
-    echo ""
-    print_info "配置 MCP 服务器..."
-
-    configure_mcp_stdio
 }
 
 verify_configuration() {
@@ -283,6 +277,9 @@ print_post_instructions() {
     echo ""
     echo "注意: 使用 cc-power run 命令启动项目以获得 Tmux 会话集成和自动唤醒功能"
     echo "传统 claude 命令将不会触发这些高级功能"
+    echo ""
+    echo "查看项目状态: cc-power status"
+    echo "查看项目日志: cc-power logs <project-name>"
 }
 
 main() {

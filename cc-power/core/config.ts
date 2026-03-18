@@ -57,6 +57,16 @@ export class ConfigManager implements IConfigManager {
   }
 
   /**
+   * 获取缓存的项目配置
+   */
+  getProjectConfig(projectId: string): ProjectConfig | null {
+    if (this.projectsCache.has(projectId)) {
+      return this.projectsCache.get(projectId)!;
+    }
+    return null;
+  }
+
+  /**
    * 监听配置文件变化（已废弃）
    */
   watch(callback: (projectId: string, config: ProjectConfig) => void): void {
