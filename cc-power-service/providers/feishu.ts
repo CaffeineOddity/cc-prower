@@ -89,13 +89,18 @@ export class FeishuProvider extends BaseProvider {
   private handleWsMessage(data: { message: any; sender?: any }): void {
     const message = data.message;
     const sender = data.sender;
+    
     if (message && (message.msg_type === 'text' || message.message_type === 'text')) {
+      this.logger.info(`handleIncomingMessage: ${data}`);
       this.handleIncomingMessage(message, sender);
+    } else {
+        this.logger.info(`[Feishu] Ignoring non-text message: ${JSON.stringify(message)}`);
     }
   }
 
   private async handleIncomingMessage(message: any, sender?: any): Promise<void> {
     try {
+
       const content = JSON.parse(message.content);
       let textContent = content.text || '';
       

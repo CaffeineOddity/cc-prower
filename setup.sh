@@ -41,7 +41,7 @@ show_usage() {
 check_directory() {
     local current_dir
     current_dir=$(pwd)
-    if [ ! -f "pnpm-workspace.yaml" ] || [ ! -d "cc-power" ] || [ ! -d "cc-power-mcp" ]; then
+    if [ ! -f "pnpm-workspace.yaml" ] || [ ! -d "cc-power-service" ] || [ ! -d "cc-power-mcp" ]; then
         print_error "请在项目根目录运行此脚本（需包含 pnpm-workspace.yaml 等文件）"
         echo "当前目录: $current_dir"
         show_usage
@@ -117,15 +117,14 @@ install_global() {
     if command -v "$CLI_NAME" &> /dev/null; then
         print_info "检测到已安装的 ${CLI_NAME}，正在卸载..."
         npm unlink -g "$CLI_NAME" > /dev/null 2>&1 || true
-        cd cc-power && npm unlink -g > /dev/null 2>&1 || true
-        cd cc-power-mcp && npm unlink -g > /dev/null 2>&1 || true
-        cd ..
+        cd cc-power-service && npm unlink -g > /dev/null 2>&1 || true && cd ..
+        cd cc-power-mcp && npm unlink -g > /dev/null 2>&1 || true && cd ..
         print_success "旧安装已清理"
     fi
 
     print_info "正在全局安装 ${CLI_NAME}..."
     cd cc-power-mcp && npm link && cd ..
-    cd cc-power && npm link cc-power-mcp && npm link && cd ..
+    cd cc-power-service && npm link cc-power-mcp && npm link && cd ..
     print_success "${CLI_NAME} 已全局安装"
 }
 
