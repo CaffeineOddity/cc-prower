@@ -51,13 +51,99 @@ export class Router implements IRouter {
   // 入站消息队列（用于 HTTP 模式）
   private incomingMessageQueue = new Map<string, IncomingMessage[]>(); // projectId → messages
 
+  // 队列最大长度限制（防止内存泄漏）
+  private readonly MAX_QUEUE_LENGTH = 50;
+
+  // 消息生存时间（毫秒），超过此时间的消息将被丢弃
+  private readonly MESSAGE_TTL = 5 * 60 * 1000; // 5分钟
+
   // 通知发送器（用于 HTTP 模式）
   private notificationSender: ((message: any) => Promise<void>) | null = null;
+
+  // 定时检查间隔（毫秒）
+  private readonly SESSION_POLL_INTERVAL = 60000; // 1 minute
+
+  // 定时检查任务句柄
+  private sessionPollTimer: NodeJS.Timeout | null = null;
 
   constructor(configManager: ConfigManager, logger: Logger, messageLogger?: MessageLogger) {
     this.configManager = configManager;
     this.logger = logger;
     this.messageLogger = messageLogger || new MessageLogger('./logs/messages');
+
+    // Start the session polling mechanism
+    this.startSessionPolling();
+  }
+
+  /**
+   * 开始 Tmux 会话轮询检查
+   */
+  private startSessionPolling(): void {
+    this.sessionPollTimer = setInterval(() => {
+      this.pollTmuxSessions().catch(error => {
+        this.logger.error('Error during tmux session polling:', error);
+      });
+    }, this.SESSION_POLL_INTERVAL);
+
+    this.logger.info(`Started tmux session polling every ${this.SESSION_POLL_INTERVAL / 1000} seconds`);
+  }
+
+  /**
+   * 停止 Tmux 会话轮询检查
+   */
+  private stopSessionPolling(): void {
+    if (this.sessionPollTimer) {
+      clearInterval(this.sessionPollTimer);
+      this.sessionPollTimer = null;
+      this.logger.info('Stopped tmux session polling');
+    }
+  }
+
+  /**
+   * 轮询检查所有注册项目的 Tmux 会话状态
+   */
+  private async pollTmuxSessions(): Promise<void> {
+    this.logger.debug('Polling tmux sessions for health check...');
+
+    // Get all registered project IDs
+    const projectIds = Array.from(this.projectTmuxSessions.keys());
+
+    if (projectIds.length === 0) {
+      this.logger.debug('No tmux sessions to poll');
+      return;
+    }
+
+    const { exec } = await import('child_process');
+    const { promisify } = await import('util');
+    const execAsync = promisify(exec);
+
+    for (const projectId of projectIds) {
+      const tmuxPane = this.projectTmuxSessions.get(projectId);
+      if (!tmuxPane) {
+        continue;
+      }
+
+      try {
+        // Extract session name from pane identifier (format: session:window.pane)
+        const sessionName = tmuxPane.split(':')[0];
+
+        // Check if the session exists
+        const result = await execAsync(`tmux has-session -t '${sessionName}' 2>/dev/null || echo "not found"`);
+        const output = result.stdout.toString().trim();
+
+        // If session doesn't exist, unregister the project
+        if (output.includes("not found") || result.stderr?.toString()?.includes("no server running")) {
+          this.logger.warn(`Tmux session ${sessionName} for project ${projectId} is dead, unregistering project`);
+
+          // Unregister the project to trigger cleanup
+          await this.unregisterProject(projectId);
+        } else {
+          this.logger.debug(`Tmux session ${sessionName} for project ${projectId} is alive`);
+        }
+      } catch (error) {
+        this.logger.error(`Failed to check tmux session ${tmuxPane} for project ${projectId}:`, error);
+      }
+    }
   }
 
   /**
@@ -171,6 +257,9 @@ export class Router implements IRouter {
   async cleanup(): Promise<void> {
     this.logger.info('Cleaning up router...');
 
+    // 停止会话轮询
+    this.stopSessionPolling();
+
     // 注销所有项目
     const projectIds = Array.from(this.providers.keys());
     for (const projectId of projectIds) {
@@ -220,7 +309,21 @@ export class Router implements IRouter {
 
     // 将消息存入队列
     const queue = this.incomingMessageQueue.get(message.projectId) || [];
+
+    // 添加时间戳用于TTL处理
+    (message as any).receivedAt = Date.now();
     queue.push(message);
+
+    // 应用队列长度限制
+    if (queue.length > this.MAX_QUEUE_LENGTH) {
+      // 丢弃最旧的消息并记录警告
+      const removedMessage = queue.shift();
+      this.logger.warn(`Message queue for project ${message.projectId} exceeded max length, removed oldest message: ${removedMessage?.content?.substring(0, 50)}...`);
+    }
+
+    // 清理过期消息
+    this.cleanupExpiredMessages(queue);
+
     this.incomingMessageQueue.set(message.projectId, queue);
 
     // Check if project is registered; if not, trigger auto-wakeup
@@ -244,6 +347,31 @@ export class Router implements IRouter {
   }
 
   /**
+   * 清理过期消息
+   */
+  private cleanupExpiredMessages(queue: IncomingMessage[]) {
+    const now = Date.now();
+    const initialLength = queue.length;
+
+    // 过滤掉超时的消息
+    const filteredQueue = queue.filter(msg => {
+      const receivedAt = (msg as any).receivedAt || now;
+      return (now - receivedAt) <= this.MESSAGE_TTL;
+    });
+
+    // 如果有过期消息被清理，记录警告
+    if (filteredQueue.length < initialLength) {
+      this.logger.warn(`Cleaned up ${initialLength - filteredQueue.length} expired messages from queue`);
+    }
+
+    // 更新队列（通过引用传递，所以这里会修改原始队列）
+    while (queue.length > 0) {
+      queue.pop();
+    }
+    filteredQueue.forEach(msg => queue.push(msg));
+  }
+
+  /**
    * 基于 Tmux 的输入注入，反向驱动 Claude Code
    */
   private async injectMessageViaTmux(message: IncomingMessage): Promise<void> {
@@ -253,11 +381,34 @@ export class Router implements IRouter {
       return;
     }
 
+    // 首先检查 Tmux 会话是否仍然存活
+    try {
+      const { exec } = await import('child_process');
+      const { promisify } = await import('util');
+      const execAsync = promisify(exec);
+
+      // 使用 tmux has-session 检查会话是否存在
+      const sessionName = tmuxPane.split(':')[0]; // Extract session name from pane identifier
+      const checkResult = await execAsync(`tmux has-session -t ${sessionName} 2>/dev/null || true`);
+
+      // If the session doesn't exist, unregister the project to trigger cleanup
+      if (checkResult.stdout.toString().includes("no server running") ||
+          checkResult.stderr.toString().includes("no server running") ||
+          checkResult.stdout.toString().includes("doesn't exist")) {
+        this.logger.warn(`Tmux session ${sessionName} for project ${message.projectId} is dead, unregistering project`);
+        await this.unregisterProject(message.projectId);
+        return;
+      }
+    } catch (error) {
+      this.logger.error(`Failed to check tmux session status for ${tmuxPane}:`, error);
+      // Continue with injection despite status check failure
+    }
+
     const content = message.content;
 
     // 构建注入的 prompt。告诉 Claude Code 处理新消息并调用 send_message 回传结果
     // 根据 TODO 第3节要求，添加系统级指令强制闭环
-    const prompt = `[来自 ${message.provider} 的新消息] 用户: ${message.userName || message.userId} 内容: ${content}\n请处理此消息，并在完成后务必调用 send_message 工具将结果发回给 chat_id: ${message.chatId}。`;
+    const prompt = `[来自 ${message.provider} 的新消息] 用户: ${message.userName || message.userId} 内容: ${content}\n请处理此消息，并在完成后务必调用 send_message 工具将结果发回给 chat_id: ${message.chatId}.`;
 
     this.logger.info(`Injecting message to tmux pane ${tmuxPane} for project ${message.projectId}`);
 
@@ -576,11 +727,16 @@ export class Router implements IRouter {
     const { project_id: projectId, since } = args;
     const queue = this.incomingMessageQueue.get(projectId) || [];
 
+    // 创建副本避免修改原队列
+    let messages = [...queue];
+
     // 如果指定了 since 时间戳，只返回该时间之后的消息
-    let messages = queue;
     if (since) {
-      messages = queue.filter(msg => msg.timestamp > since);
+      messages = messages.filter(msg => msg.timestamp > since);
     }
+
+    // 清理过期消息
+    this.cleanupExpiredMessages(queue);
 
     // 清空队列（返回的消息已被消费）
     this.incomingMessageQueue.set(projectId, []);
@@ -650,11 +806,15 @@ export class Router implements IRouter {
       // 在后台执行 cc-power run 命令
       const { spawn } = await import('child_process');
 
-      // 使用 spawn 来异步启动项目而不阻塞当前调用
-      const runProcess = spawn('npx', ['cc-power', 'run', projectRecord.projectPath, '--session', projectRecord.sessionName], {
-        detached: true,  // 分离进程，使其独立运行
-        stdio: 'ignore'  // 忽略输入输出，不干扰当前进程
-      });
+      // 使用当前 Node.js 进程的执行路径动态启动，而不是硬编码 npx
+      const runProcess = spawn(
+        process.execPath,
+        [process.argv[1], 'run', projectRecord.projectPath, '--session', projectRecord.sessionName],
+        {
+          detached: true,  // 分离进程，使其独立运行
+          stdio: 'ignore'  // 忽略输入输出，不干扰当前进程
+        }
+      );
 
       // 不等待子进程结束，立即返回成功
       runProcess.unref(); // 使父进程不必等待子进程

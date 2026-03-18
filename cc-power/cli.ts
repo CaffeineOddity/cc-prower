@@ -540,25 +540,53 @@ async function recordProjectHistory(projectId: string, projectPath: string, conf
 
   const historyPath = path.join(cacheDir, 'project_history.json');
 
-  let history: any = {};
+  // Import required modules for atomic write and locking
+  const { writeFileAtomic } = await import('write-file-atomic');
+  const { lock, unlock } = await import('proper-lockfile');
+
+  // Acquire a lock before reading/writing the file
+  let releaseLock: (() => Promise<void>) | null = null;
   try {
-    const content = await fs.readFile(historyPath, 'utf-8');
-    history = JSON.parse(content);
+    releaseLock = await lock(historyPath, {
+      retries: 5,
+      retryDelay: 100,
+      stale: 30000, // Lock expires after 30 seconds
+      onCompromised: (err) => console.error('Lock compromised:', err),
+    });
+
+    let history: any = {};
+    try {
+      const content = await fs.readFile(historyPath, 'utf-8');
+      history = JSON.parse(content);
+    } catch (error) {
+      // File doesn't exist or is malformed, start with empty object
+    }
+
+    history[projectId] = {
+      projectId,
+      projectPath,
+      config,
+      sessionName,
+      createdAt: Date.now(),
+      lastUsed: Date.now(),
+    };
+
+    // Write the file atomically
+    await writeFileAtomic(historyPath, JSON.stringify(history, null, 2));
+    console.log(`Project history recorded for ${projectId}`);
   } catch (error) {
-    // 文件不存在或格式错误，使用空对象
+    console.error(`Failed to record project history for ${projectId}:`, error);
+    throw error;
+  } finally {
+    // Release the lock if it was acquired
+    if (releaseLock) {
+      try {
+        await releaseLock();
+      } catch (lockError) {
+        console.error('Failed to release lock:', lockError);
+      }
+    }
   }
-
-  history[projectId] = {
-    projectId,
-    projectPath,
-    config,
-    sessionName,
-    createdAt: Date.now(),
-    lastUsed: Date.now(),
-  };
-
-  await fs.writeFile(historyPath, JSON.stringify(history, null, 2));
-  console.log(`Project history recorded for ${projectId}`);
 }
 
 /**
@@ -642,7 +670,20 @@ async function showLogs(project: string | undefined, options: any) {
 async function processSignalFile(filePath: string, backend: any, logger: any): Promise<void> {
   try {
     const fileName = path.basename(filePath);
-    const fileContent = await fs.readFile(filePath, 'utf-8');
+
+    // Add try-catch around file read to handle ENOENT errors from race conditions
+    let fileContent: string;
+    try {
+      fileContent = await fs.readFile(filePath, 'utf-8');
+    } catch (readError: any) {
+      if (readError.code === 'ENOENT') {
+        // File was already processed and deleted by another process
+        logger.debug(`Signal file already processed and deleted: ${filePath}`);
+        return;
+      }
+      throw readError; // Re-throw other errors
+    }
+
     const signal = JSON.parse(fileContent);
 
     logger.info(`Processing signal file: ${fileName}`, signal);
@@ -680,8 +721,17 @@ async function processSignalFile(filePath: string, backend: any, logger: any): P
       logger.info(`Successfully registered project: ${projectId} from signal`);
 
       // 处理完成后删除信号文件
-      await fs.unlink(filePath);
-      logger.debug(`Deleted processed signal file: ${filePath}`);
+      try {
+        await fs.unlink(filePath);
+        logger.debug(`Deleted processed signal file: ${filePath}`);
+      } catch (unlinkError: any) {
+        if (unlinkError.code === 'ENOENT') {
+          // File was already deleted by another process
+          logger.debug(`Signal file already deleted by another process: ${filePath}`);
+        } else {
+          logger.error(`Failed to delete signal file ${filePath}:`, unlinkError);
+        }
+      }
     } else if (fileName.startsWith('unregister-') && fileName.endsWith('.json')) {
       // 处理注销信号
       const projectId = signal.projectId;
@@ -695,8 +745,17 @@ async function processSignalFile(filePath: string, backend: any, logger: any): P
       logger.info(`Successfully unregistered project: ${projectId} from signal`);
 
       // 处理完成后删除信号文件
-      await fs.unlink(filePath);
-      logger.debug(`Deleted processed signal file: ${filePath}`);
+      try {
+        await fs.unlink(filePath);
+        logger.debug(`Deleted processed signal file: ${filePath}`);
+      } catch (unlinkError: any) {
+        if (unlinkError.code === 'ENOENT') {
+          // File was already deleted by another process
+          logger.debug(`Signal file already deleted by another process: ${filePath}`);
+        } else {
+          logger.error(`Failed to delete signal file ${filePath}:`, unlinkError);
+        }
+      }
     }
   } catch (error) {
     logger.error(`Failed to process signal file ${filePath}:`, error);

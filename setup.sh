@@ -47,6 +47,26 @@ check_directory() {
         show_usage
         exit 1
     fi
+
+    # 检查是否安装了 tmux
+    if ! command -v tmux &> /dev/null; then
+        print_error "未检测到 tmux，请先安装 tmux。"
+        echo ""
+        echo "macOS 用户可以使用："
+        echo "  brew install tmux"
+        echo ""
+        echo "Ubuntu/Debian 用户可以使用："
+        echo "  apt-get update && apt-get install tmux"
+        echo ""
+        echo "CentOS/RHEL 用户可以使用："
+        echo "  yum install tmux"
+        echo "  # 或者"
+        echo "  dnf install tmux"
+        echo ""
+        exit 1
+    else
+        print_info "检测到 tmux: $(tmux -V)"
+    fi
 }
 
 # 构建项目

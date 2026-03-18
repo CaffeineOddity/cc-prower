@@ -36,162 +36,6 @@ print_success() { printf "%b%s%b %s\n" "$GREEN" "[SUCCESS]" "$NC" "$1"; }
 print_warning() { printf "%b%s%b %s\n" "$YELLOW" "[WARNING]" "$NC" "$1"; }
 print_error() { printf "%b%s%b %s\n" "$RED" "[ERROR]" "$NC" "$1"; }
 
-# -----------------------------------------------------------------------------
-# 函数: merge_settings_json
-# 描述: 合并脚本目录下的 settings.json 和项目原有的 settings.json，
-#       通过读取 hooks 的 keys，如果目标 hooks 数组中不存在相同的命令，则追加合并，
-#       而不是直接覆盖原有的 hook 事件数组，从而保留用户自定义的 hooks。
-# 参数:
-#   $1 - source_file: 脚本目录下的 settings.json 路径
-#   $2 - target_file: 项目目录下的 settings.json 路径
-# 返回值: 无
-# -----------------------------------------------------------------------------
-merge_settings_json() {
-    local source_file="$1"
-    local target_file="$2"
-
-    if command -v node &> /dev/null; then
-        node -e "
-const fs = require('fs');
-const srcFile = process.argv[1];
-const tgtFile = process.argv[2];
-
-let srcData = {};
-try { srcData = JSON.parse(fs.readFileSync(srcFile, 'utf8')); } catch(e) { process.exit(1); }
-
-let tgtData = {};
-if (fs.existsSync(tgtFile)) {
-    try { tgtData = JSON.parse(fs.readFileSync(tgtFile, 'utf8')); } catch(e) {}
-}
-
-tgtData.hooks = tgtData.hooks || {};
-if (srcData.hooks) {
-    for (const key in srcData.hooks) {
-        if (!tgtData.hooks[key]) {
-            tgtData.hooks[key] = srcData.hooks[key];
-        } else {
-            // 对每个源配置的 matcher/hooks 组进行追加，前提是 command 没有重复
-            srcData.hooks[key].forEach(srcGroup => {
-                let merged = false;
-                tgtData.hooks[key].forEach(tgtGroup => {
-                    if (tgtGroup.matcher === srcGroup.matcher) {
-                        srcGroup.hooks.forEach(srcHook => {
-                            const exists = tgtGroup.hooks.some(tgtHook => tgtHook.command === srcHook.command);
-                            if (!exists) {
-                                tgtGroup.hooks.push(srcHook);
-                            }
-                        });
-                        merged = true;
-                    }
-                });
-                if (!merged) {
-                    tgtData.hooks[key].push(srcGroup);
-                }
-            });
-        }
-    }
-}
-
-fs.writeFileSync(tgtFile, JSON.stringify(tgtData, null, 2));
-" "$source_file" "$target_file"
-    elif command -v python3 &> /dev/null; then
-        python3 -c '
-import json, os, sys
-src_file = sys.argv[1]
-tgt_file = sys.argv[2]
-
-try:
-    with open(src_file, "r") as f:
-        src_data = json.load(f)
-except Exception:
-    sys.exit(1)
-
-tgt_data = {}
-if os.path.exists(tgt_file):
-    try:
-        with open(tgt_file, "r") as f:
-            tgt_data = json.load(f)
-    except Exception:
-        pass
-
-tgt_data.setdefault("hooks", {})
-if "hooks" in src_data:
-    for key, src_groups in src_data["hooks"].items():
-        if key not in tgt_data["hooks"]:
-            tgt_data["hooks"][key] = src_groups
-        else:
-            tgt_groups = tgt_data["hooks"][key]
-            for src_group in src_groups:
-                merged = False
-                for tgt_group in tgt_groups:
-                    if tgt_group.get("matcher") == src_group.get("matcher"):
-                        tgt_hooks = tgt_group.setdefault("hooks", [])
-                        for src_hook in src_group.get("hooks", []):
-                            if not any(h.get("command") == src_hook.get("command") for h in tgt_hooks):
-                                tgt_hooks.append(src_hook)
-                        merged = True
-                if not merged:
-                    tgt_groups.append(src_group)
-
-with open(tgt_file, "w") as f:
-    json.dump(tgt_data, f, indent=2)
-' "$source_file" "$target_file"
-    else
-        # 降级：如果没有 node/python3，但目标文件不存在，则直接 cp
-        if [ ! -f "$target_file" ]; then
-            cp "$source_file" "$target_file"
-        else
-            print_warning "缺少 node 或 python3，无法安全合并 settings.json，将不执行覆盖以免丢失您的配置。"
-            print_warning "请手动参考 $source_file 将 hooks 配置到 $target_file 中。"
-            return 1
-        fi
-    fi
-    print_success "已合并/复制 settings.json"
-}
-
-# -----------------------------------------------------------------------------
-# 函数: setup_claude_code_hooks
-# 描述: 将脚本目录下的 Claude Code hooks 及配置复制到项目的 .claude 目录下
-# 参数:
-#   $1 - project_path: 要配置的目标项目路径
-# 返回值: 无
-# -----------------------------------------------------------------------------
-setup_claude_code_hooks() {
-    local project_path="$1"
-
-    echo ""
-    print_info "配置 Claude Code hooks..."
-
-    local hooks_source_dir hooks_dir claude_dir
-    hooks_source_dir="$SCRIPT_DIR/script/claude_code_hooks"
-
-    if [ -d "$hooks_source_dir" ]; then
-        claude_dir="$project_path/.claude"
-        hooks_dir="$claude_dir/hooks"
-        mkdir -p "$hooks_dir"
-
-        if [ -f "$hooks_source_dir/session-start.py" ]; then
-            cp "$hooks_source_dir/session-start.py" "$hooks_dir/"
-            chmod +x "$hooks_dir/session-start.py"
-            print_success "已复制 session-start.py"
-        fi
-
-        if [ -f "$hooks_source_dir/session-end.py" ]; then
-            cp "$hooks_source_dir/session-end.py" "$hooks_dir/"
-            chmod +x "$hooks_dir/session-end.py"
-            print_success "已复制 session-end.py"
-        fi
-
-        if [ -f "$hooks_source_dir/settings.json" ]; then
-            merge_settings_json "$hooks_source_dir/settings.json" "$claude_dir/settings.json"
-        fi
-
-        print_info "Hooks 配置完成到: $claude_dir"
-    else
-        print_warning "未找到 hooks 脚本目录: $hooks_source_dir，跳过 hooks 配置"
-    fi
-}
-
 # 显示使用说明
 show_usage() {
     echo "用法: ./setup-project-mcp.sh <项目路径>"
@@ -366,16 +210,6 @@ ensure_project_config() {
     create_config_template "$choice" "$project_path"
 }
 
-choose_transport_mode() {
-    echo ""
-    echo "请选择 MCP 传输模式:"
-    echo "  1) STDIO - 模式简单，适合开发使用（推荐）"
-    echo "  2) HTTP/SSE - 需要单独启动服务器，适合生产环境"
-    echo ""
-    read -p "请选择 (1-2) [1]: " transport_choice
-    transport_choice="${transport_choice:-1}"
-}
-
 mcp_server_exists() {
     claude mcp list 2>&1 | grep -q "$MCP_NAME"
 }
@@ -404,56 +238,8 @@ prepare_mcp_configuration() {
     return 0
 }
 
-get_http_port() {
-    local project_path="$1"
-    local port="8888"
-    local global_config
-    global_config="$(dirname "$project_path")/config.yaml"
-
-    if [ -f "$global_config" ]; then
-        port="$(grep -E "^\s*port:" "$global_config" | awk '{print $2}' || echo "8888")"
-        if [ -z "$port" ]; then
-            port="8888"
-        fi
-    fi
-
-    echo "$port"
-}
-
-configure_mcp_http() {
-    local project_path="$1"
-
-    print_info "使用 HTTP/SSE 模式"
-
-    local port mcp_url
-    port="$(get_http_port "$project_path")"
-    mcp_url="http://127.0.0.1:$port/mcp"
-
-    if ! prepare_mcp_configuration; then
-        echo ""
-        print_warning "HTTP 模式需要单独启动服务器！"
-        echo "运行以下命令启动服务器:"
-        echo "  $CLI_NAME start"
-        echo ""
-        return 0
-    fi
-
-    print_info "$MCP_ADD_MESSAGE"
-    if claude mcp add --transport http "$MCP_NAME" "$mcp_url" > /dev/null 2>&1; then
-        print_success "MCP 服务器配置成功 (URL: $mcp_url)"
-    else
-        print_error "MCP 服务器配置失败"
-    fi
-
-    echo ""
-    print_warning "HTTP 模式需要单独启动服务器！"
-    echo "运行以下命令启动服务器:"
-    echo "  $CLI_NAME start"
-    echo ""
-}
-
 configure_mcp_stdio() {
-    print_info "使用 STDIO 模式"
+    print_info "使用 STDIO 模式（当前唯一支持的模式）"
 
     if ! prepare_mcp_configuration; then
         return 0
@@ -469,16 +255,11 @@ configure_mcp_stdio() {
 
 configure_mcp_server() {
     local project_path="$1"
-    local selected_transport="$2"
 
     echo ""
     print_info "配置 MCP 服务器..."
 
-    if [ "$selected_transport" = "2" ]; then
-        configure_mcp_http "$project_path"
-    else
-        configure_mcp_stdio
-    fi
+    configure_mcp_stdio
 }
 
 verify_configuration() {
@@ -492,27 +273,16 @@ verify_configuration() {
 
 print_post_instructions() {
     local project_path="$1"
-    local selected_transport="$2"
 
     echo ""
     print_success "配置完成！"
     echo ""
     echo "使用方法:"
-    if [ "$selected_transport" = "2" ]; then
-        echo "  1. 启动 HTTP 服务器（在一个新终端）:"
-        echo "     $CLI_NAME start"
-        echo ""
-        echo "  2. 进入项目目录并启动 Claude Code:"
-        echo "     cd $project_path"
-        echo "     claude"
-        echo ""
-        echo "  注意: HTTP 模式需要保持服务器运行"
-    else
-        echo "  cd $project_path"
-        echo "  claude"
-        echo ""
-        echo "  注意: STDIO 模式下 MCP 服务器会自动启动，无需手动启动"
-    fi
+    echo "  cd $project_path"
+    echo "  cc-power run ."
+    echo ""
+    echo "注意: 使用 cc-power run 命令启动项目以获得 Tmux 会话集成和自动唤醒功能"
+    echo "传统 claude 命令将不会触发这些高级功能"
 }
 
 main() {
@@ -527,11 +297,13 @@ main() {
     cd "$PROJECT_PATH"
     ensure_project_config "$PROJECT_PATH"
 
-    choose_transport_mode
-    configure_mcp_server "$PROJECT_PATH" "$transport_choice"
-    setup_claude_code_hooks "$PROJECT_PATH"
+    # 默认使用 STDIO 模式，不再询问
+    configure_mcp_server "$PROJECT_PATH"
+
+    # 跳过 Claude Code hooks 配置，因为现在使用 cc-power run 命令
+
     verify_configuration
-    print_post_instructions "$PROJECT_PATH" "$transport_choice"
+    print_post_instructions "$PROJECT_PATH"
 }
 
 main "$@"
