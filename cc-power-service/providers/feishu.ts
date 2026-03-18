@@ -91,10 +91,10 @@ export class FeishuProvider extends BaseProvider {
     const sender = data.sender;
     
     if (message && (message.msg_type === 'text' || message.message_type === 'text')) {
-      this.logger.info(`handleIncomingMessage: ${data}`);
+      console.log(`handleIncomingMessage: ${data}`);
       this.handleIncomingMessage(message, sender);
     } else {
-        this.logger.info(`[Feishu] Ignoring non-text message: ${JSON.stringify(message)}`);
+        console.log(`[Feishu] Ignoring non-text message: ${JSON.stringify(message)}`);
     }
   }
 
