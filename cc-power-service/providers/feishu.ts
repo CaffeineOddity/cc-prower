@@ -53,7 +53,6 @@ export class FeishuProvider extends BaseProvider {
 
     this.connected = true;
     this.logger.info(`Feishu provider connected (chat_id: ${chatId}, priority: ${priority}${keyword ? `, keyword: ${keyword}` : ''})`);
-    this.logger.info(`Feishu provider connected (chat_id: ${chatId}, priority: ${priority}${keyword ? `, keyword: ${keyword}` : ''})`);
   }
 
   private async getUserName(userId: string): Promise<string> {
