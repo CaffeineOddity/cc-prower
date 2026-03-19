@@ -147,10 +147,15 @@ export class RunCommand extends BaseCommand {
     const app_id = projectConfig.provider?.app_id || projectConfig.app_id || '';
     const chat_id = projectConfig.provider?.chat_id || projectConfig.chat_id || '';
 
-    // 使用 app_id + chat_id 生成唯一的 session 标识
-    // 确保不同的 app_id 或 chat_id 有不同的 session
-    const uniqueId = app_id ? `${app_id.substring(0, 8)}-${chat_id.substring(0, 8)}` : projectId;
-    const sessionName = session || `cc-p-${uniqueId}`;
+    // 生成唯一的 session 名称：使用项目名，但保留足够的唯一性
+    // tmux session 名称的限制：
+    // 1. 不能包含某些特殊字符
+    // 2. 名称长度应该合理
+    // 3. 同一个项目在同一时刻只能有一个 session
+
+    // 规范化项目名称：移除或替换 tmux 不支持的字符
+    const safeProjectName = projectId.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const sessionName = session || safeProjectName;
 
     // 检查 tmux
     checkTmuxInstalled();

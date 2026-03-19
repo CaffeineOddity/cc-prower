@@ -385,7 +385,9 @@ export class Router implements IRouter {
 
       // 查找匹配的 pane 信息行
       const currentCommandLine = lines.find(line => {
-        const [sessionName, windowIndex, paneIndex] = line.split(' ');
+        const [sessionWindow, paneInfo] = line.split(' ');
+        const [sessionName, windowIndex] = sessionWindow.split(':');
+        const [paneIndex] = paneInfo.split(':');
         return sessionName === sessionTarget && windowIndex === windowTarget && paneIndex === paneTarget;
       });
 

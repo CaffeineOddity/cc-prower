@@ -272,7 +272,7 @@ export class StartCommand extends BaseCommand {
   private async handleNewHookSignal(signal: any): Promise<void> {
     if (!this.router || !this.logger) return;
 
-    const { provider, project_id: projectId, transcript_path: transcriptPath, last_assistant_message: lastAssistantMessage } = signal;
+    const { project_id: projectId, transcript_path: transcriptPath, last_assistant_message: lastAssistantMessage } = signal;
 
     const providerInstance = this.router.getProvider(projectId);
     if (!providerInstance) {
@@ -314,6 +314,6 @@ export class StartCommand extends BaseCommand {
     }
 
     await providerInstance.sendMessage(chatId, content);
-    this.logger.info(`Hook message sent to ${provider}:${chatId}`);
+    this.logger.info(`Hook message sent to ${projectId}:${chatId}`);
   }
 }
