@@ -281,6 +281,7 @@ async function initProject(name: string, options: any) {
   }
 
   // 从 templates 目录读取配置模板
+  // __dirname 在编译后指向 dist/cli.js 所在目录
   const templatePath = path.join(__dirname, 'providers', 'templates', `${provider}-template.yaml`);
   let configTemplate = '';
 
@@ -289,6 +290,7 @@ async function initProject(name: string, options: any) {
   } catch (error) {
     console.error(`Unknown provider or template not found: ${provider}`);
     console.error(`Expected template at: ${templatePath}`);
+    console.error(`__dirname: ${__dirname}`);
     process.exit(1);
   }
 

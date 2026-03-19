@@ -6,7 +6,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
-    "build": "tsc && chmod +x dist/cli.js && mkdir -p dist/claude-code-hooks && cp claude-code-hooks/settings.json dist/claude-code-hooks/settings.json && cp claude-code-hooks/stop-hook.sh dist/claude-code-hooks/stop-hook.sh",
+    "build": "tsc && chmod +x dist/cli.js && mkdir -p dist/claude-code-hooks && cp claude-code-hooks/settings.json dist/claude-code-hooks/settings.json && cp claude-code-hooks/stop-hook.sh dist/claude-code-hooks/stop-hook.sh && cp -r providers/templates dist/providers/",
     "dev": "tsx cli.ts start",
     "start": "node dist/cli.js start",
     "cli": "tsx cli.ts",
