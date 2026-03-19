@@ -63,8 +63,6 @@ export class ConfigManager implements IConfigManager {
     if (this.projectsCache.has(projectId)) {
       return this.projectsCache.get(projectId)!;
     }
-
-    // 现在项目配置由客户端通过 MCP 传递，不再从文件系统加载
     return null;
   }
 
@@ -85,12 +83,6 @@ export class ConfigManager implements IConfigManager {
     return null;
   }
 
-  /**
-   * 监听配置文件变化（已废弃）
-   */
-  watch(callback: (projectId: string, config: ProjectConfig) => void): void {
-    console.log('Config watch is deprecated. Projects are now registered via MCP.');
-  }
 
   /**
    * 获取全局配置

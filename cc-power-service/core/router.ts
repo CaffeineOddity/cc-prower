@@ -6,7 +6,6 @@ import type {
   ProviderConfig,
   ProjectConfig,
   IProvider,
-  ProviderConfigBase,
 } from '../types/index.js';
 import { ConfigManager } from './config.js';
 import { Logger } from './logger.js';
@@ -252,7 +251,6 @@ export class Router implements IRouter {
    */
   private handleIncomingMessage(message: IncomingMessage): void {
     this.logger.debug(`Incoming message: ${JSON.stringify(message)}`);
-
     // 记录消息到日志
     this.messageLogger.logIncoming(
       message.projectId,

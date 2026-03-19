@@ -912,8 +912,8 @@ async function setupHooks(projectPath: string = '.') {
   await fs.mkdir(hooksDir, { recursive: true });
 
   // 复制 shell hook 脚本
-  const hookTemplatePath = path.join(__dirname, 'claude-code-hooks', 'on-response.sh');
-  const hookDestPath = path.join(hooksDir, 'on-response.sh');
+  const hookTemplatePath = path.join(__dirname, 'claude-code-hooks', 'stop-hook.sh');
+  const hookDestPath = path.join(hooksDir, 'stop-hook.sh');
 
   try {
     await fs.copyFile(hookTemplatePath, hookDestPath);
@@ -975,7 +975,10 @@ async function processHookSignal(filePath: string, router: Router, logger: Logge
 
     const signal = JSON.parse(fileContent);
     logger.info(`Received hook signal: ${JSON.stringify(signal)}`);
-    if (signal.type === 'send_message') {
+
+    // 支持新旧两种信号格式
+    if (signal.type === 'send_message' && signal.chatId && signal.content) {
+      // 旧格式: 直接包含 chatId 和 content
       const { provider, projectId, chatId, content } = signal;
 
       const providerInstance = router.getProvider(projectId);
@@ -986,6 +989,62 @@ async function processHookSignal(filePath: string, router: Router, logger: Logge
 
       await providerInstance.sendMessage(chatId, content);
       logger.info(`Hook message sent to ${provider}:${chatId}`);
+    } else if (signal.hook_event_name === 'Stop' || signal.provider && signal.project_id) {
+      // 新格式: 需要从历史和 transcript 获取信息
+      const { provider, project_id: projectId, transcript_path: transcriptPath, last_assistant_message: lastAssistantMessage } = signal;
+
+      const providerInstance = router.getProvider(projectId);
+      if (!providerInstance) {
+        logger.error(`Provider not found for project: ${projectId}`);
+        return;
+      }
+
+      // 从项目历史获取 chat_id
+      const historyPath = path.join(process.env.HOME || '', '.cc-power', 'cache', 'project_history.json');
+      let chatId: string | null = null;
+
+      try {
+        const historyContent = await fs.readFile(historyPath, 'utf-8');
+        const history = JSON.parse(historyContent);
+        chatId = history[projectId]?.config?.chat_id || history[projectId]?.config?.provider?.chat_id;
+      } catch (error) {
+        logger.error(`Failed to read history for project ${projectId}:`, error);
+      }
+
+      if (!chatId) {
+        logger.error(`No chat_id found for project: ${projectId}`);
+        return;
+      }
+
+      // 获取响应内容（从 transcript 或 last_assistant_message）
+      let content = lastAssistantMessage;
+      if (transcriptPath) {
+        try {
+          const transcriptLines = await fs.readFile(transcriptPath, 'utf-8');
+          // 解析 jsonl 获取最后一条助手消息
+          const lines = transcriptLines.trim().split('\n');
+          for (let i = lines.length - 1; i >= 0; i--) {
+            const entry = JSON.parse(lines[i]);
+            if (entry.role === 'assistant') {
+              content = entry.content;
+              break;
+            }
+          }
+        } catch (error) {
+          logger.warn(`Failed to read transcript, using last_assistant_message:`, error);
+        }
+      }
+
+      if (!content) {
+        logger.warn(`No content found for hook signal`);
+        return;
+      }
+
+      await providerInstance.sendMessage(chatId, content);
+      logger.info(`Hook message sent to ${provider}:${chatId}`);
+    } else {
+      logger.warn(`Unknown hook signal format: ${JSON.stringify(signal)}`);
+      return;
     }
 
     // 处理完成后删除信号文件
