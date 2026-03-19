@@ -133,16 +133,10 @@ export class Router implements IRouter {
    */
   async registerProject(projectId: string, config: ProjectConfig): Promise<void> {
     const { provider } = config;
-
-    // 支持新旧两种 provider 格式
     let providerType: string;
     let providerSpecificConfig: any = {};
 
-    if (typeof provider === 'string') {
-      // 旧格式: provider: "feishu", feishu: { ... }
-      providerType = provider;
-      providerSpecificConfig = config[provider] || {};
-    } else if (provider && typeof provider === 'object' && 'name' in provider) {
+    if (provider && typeof provider === 'object' && 'name' in provider) {
       // 新格式: provider: { name: "feishu", app_id: "...", ... }
       providerType = provider.name;
       providerSpecificConfig = provider;
@@ -196,8 +190,6 @@ export class Router implements IRouter {
       const errorMessage = connectionError instanceof Error ? connectionError.message : String(connectionError);
       this.logger.error(`Failed to connect to provider for project ${projectId}: ${errorMessage}`);
       this.logger.error(`Stack: ${connectionError instanceof Error ? connectionError.stack : 'No stack'}`);
-      // Still consider the registration successful but with failed connection
-      // This allows the project to be tracked even with connection issues
     }
   }
 

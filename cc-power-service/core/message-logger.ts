@@ -1,5 +1,6 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { homedir } from 'os';
 
 /**
  * 消息日志条目
@@ -26,8 +27,8 @@ export class MessageLogger {
   private projectLogs = new Map<string, MessageLogEntry[]>();
   private maxEntriesPerProject: number;
 
-  constructor(logDir: string = './logs/messages', maxEntriesPerProject: number = 1000) {
-    this.logDir = logDir;
+  constructor(logDir?: string, maxEntriesPerProject: number = 1000) {
+    this.logDir = logDir || path.join(homedir(), '.cc-power/tmp/logs/messages');
     this.maxEntriesPerProject = maxEntriesPerProject;
   }
 
