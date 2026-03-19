@@ -1,14 +1,17 @@
 #!/usr/bin/env node
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
 import { spawn, execSync } from 'child_process';
 import { Command } from 'commander';
 import { ConfigManager } from './core/config.js';
 import { Logger } from './core/logger.js';
 import { Router } from './core/router.js';
 import { MessageLogger } from './core/message-logger.js';
-import { MCPServer } from 'cc-power-mcp';
 import chokidar from 'chokidar';
+
+// ES Module __dirname workaround
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const CLI_NAME = 'ccpower';
 const CLI_VERSION = '1.0.0';
@@ -140,6 +143,14 @@ program
     await showLogs(project, options);
   });
 
+program
+  .command('setup-hooks')
+  .description('Setup Claude Code hooks for automatic response sending')
+  .argument('[path]', 'Path to project directory', '.')
+  .action(async (projectPath) => {
+    await setupHooks(projectPath);
+  });
+
 program.parse();
 
 /**
@@ -160,12 +171,8 @@ async function startService(options: any) {
   // 创建日志器
   const logger = new Logger(globalConfig.logging);
 
-  // 如果设置了 --stdio 标志，强制使用 stdio 模式
-  const transportMode = forceStdio ? 'stdio' : globalConfig.mcp.transport;
-
   logger.info(`${CLI_NAME} starting...`);
   logger.info(`Config: ${actualConfigPath}`);
-  logger.info(`Transport: ${transportMode}${forceStdio ? ' (forced by --stdio flag)' : ''}`);
 
   // 创建消息日志器
   const messageLogger = new MessageLogger('./logs/messages');
@@ -174,102 +181,6 @@ async function startService(options: any) {
   // 创建路由器
   const router = new Router(configManager, logger, messageLogger);
   await router.initializeMessageLogger();
-
-  // 创建 Backend Service 适配器
-  const backend = {
-    async registerProject(projectId: string, config: any): Promise<void> {
-      await router.registerProject(projectId, config);
-    },
-
-    async unregisterProject(projectId: string): Promise<void> {
-      await router.unregisterProject(projectId);
-    },
-
-    async sendMessage(args: {
-      provider: string;
-      chat_id: string;
-      content: string;
-      project_id?: string;
-    }): Promise<any> {
-      await router.handleMCPMessage({
-        jsonrpc: '2.0',
-        method: 'tools/call',
-        params: {
-          name: 'send_message',
-          arguments: args,
-        },
-      });
-    },
-
-    async listChats(args: {
-      provider: string;
-      project_id?: string;
-    }): Promise<any> {
-      return await router.handleMCPMessage({
-        jsonrpc: '2.0',
-        method: 'tools/call',
-        params: {
-          name: 'list_chats',
-          arguments: args,
-        },
-      });
-    },
-
-    async getStatus(args: { provider?: string }): Promise<any> {
-      return await router.handleMCPMessage({
-        jsonrpc: '2.0',
-        method: 'tools/call',
-        params: {
-          name: 'get_status',
-          arguments: args,
-        },
-      });
-    },
-
-    getRegisteredProjects(): string[] {
-      return router.getRegisteredProjects();
-    },
-
-    logDebug(message: string, ...args: any[]): void {
-      logger.debug(message, ...args);
-    },
-
-    logInfo(message: string, ...args: any[]): void {
-      logger.info(message, ...args);
-    },
-
-    logWarn(message: string, ...args: any[]): void {
-      logger.warn(message, ...args);
-    },
-
-    logError(message: string, ...args: any[]): void {
-      logger.error(message, ...args);
-    },
-
-    async sendHeartbeat(projectId: string): Promise<void> {
-      // Heartbeat functionality has been removed in favor of Tmux-based session monitoring
-      // The function remains for interface compatibility but does nothing
-      logger.debug(`Heartbeat call for ${projectId} (deprecated)`);
-    },
-
-    getProjectHeartbeatStatus(projectId: string): { lastHeartbeat: number; isAlive: boolean } {
-      // Heartbeat functionality has been removed in favor of Tmux-based session monitoring
-      // The function returns a default value for interface compatibility
-      logger.debug(`Heartbeat status request for ${projectId} (deprecated)`);
-      return { lastHeartbeat: Date.now(), isAlive: true };
-    },
-
-    async getIncomingMessages(args: {
-      project_id: string;
-      since?: number;
-    }): Promise<any[]> {
-      return await router.getIncomingMessages(args);
-    },
-
-    setNotificationSender(sender: (message: any) => Promise<void>): void {
-      router.setNotificationSender(sender);
-    },
-  };
 
   // 设置信号目录路径
   const signalsDir = path.join(process.env.HOME || '', '.cc-power', 'signals');
@@ -283,27 +194,31 @@ async function startService(options: any) {
 
   watcher.on('add', async (filePath) => {
     if (filePath.endsWith('.json')) {
-      await processSignalFile(filePath, backend, logger);
+      await processSignalFile(filePath, router, logger);
     }
   });
 
-  // 创建 MCP 服务器
-  const mcpServer = new MCPServer(backend, {
-    name: CLI_NAME,
-    version: CLI_VERSION,
+  // 设置 hooks 目录路径（用于 Claude Code hooks）
+  const hooksDir = path.join(process.env.HOME || '', '.cc-power', 'hooks');
+  await fs.mkdir(hooksDir, { recursive: true });
+
+  // 创建文件监听器，监听 hooks 信号文件
+  const hooksWatcher = chokidar.watch(hooksDir, {
+    ignored: /^\./, // 忽略隐藏文件
+    persistent: true,
   });
 
-  // 根据传输方式启动
-  if (transportMode === 'http') {
-    if (!forceStdio) console.log(`${CLI_NAME} does not support HTTP mode anymore. Using stdio mode.`);
-  }
+  hooksWatcher.on('add', async (filePath) => {
+    logger.info(`[cc-power] hooksWatcher add: ${filePath}`);
+    if (path.basename(filePath).startsWith('send-') && filePath.endsWith('.json')) {
+      await processHookSignal(filePath, router, logger);
+    }
+  });
 
   if (!forceStdio) {
-    console.log(`${CLI_NAME} is ready. Projects will be registered when clients connect via MCP.`);
+    console.log(`${CLI_NAME} is ready. Projects will be registered when you run 'ccpower run'.`);
     console.log('Press Ctrl+C to stop the server.\n');
   }
-
-  await mcpServer.startStdio();
 
   // 优雅关闭
   const shutdown = async () => {
@@ -312,7 +227,6 @@ async function startService(options: any) {
     // 清理路由器资源
     await router.cleanup();
 
-    await mcpServer.stop();
     logger.info('Shutdown complete');
     process.exit(0);
   };
@@ -578,21 +492,6 @@ async function runProject(projectPath: string, options: any, claudeArgs: string[
   const absProjectPath = path.resolve(projectPath);
   const projectName = path.basename(absProjectPath);
 
-  const crypto = await import('crypto');
-  // 必须与 mcp 中的 inferProjectId 保持绝对一致的生成规则
-  const normalizedPath = path.resolve(absProjectPath).replace(/\/$/, '');
-  const projectId = crypto.createHash('md5').update(normalizedPath).digest('hex').substring(0, 8);
-
-  const sessionName = session || `cc-p-${projectId}`;
-
-  // 检查是否安装了 tmux
-  try {
-    execSync('tmux -V', { stdio: 'ignore' });
-  } catch (error) {
-    console.error('Error: tmux is not installed. Please install tmux to use this command.');
-    process.exit(1);
-  }
-
   // 尝试加载项目配置
   const configPaths = [
     path.join(absProjectPath, '.cc-power.yaml'),
@@ -612,7 +511,28 @@ async function runProject(projectPath: string, options: any, claudeArgs: string[
   }
 
   if (!projectConfig) {
-    console.warn(`Warning: No .cc-power.yaml found in ${absProjectPath}. Using default settings.`);
+    console.error(`Error: No .cc-power.yaml found in ${absProjectPath}`);
+    console.error('Please run "ccpower init" to create a project config file.');
+    process.exit(1);
+  }
+
+  // 从配置文件读取 project_id
+  if (!projectConfig.project_id) {
+    console.error(`Error: project_id is required in .cc-power.yaml.`);
+    console.error('Please add it to your configuration:');
+    console.error('  project_id: my-project-name');
+    process.exit(1);
+  }
+
+  const projectId = projectConfig.project_id;
+  const sessionName = session || `cc-p-${projectId}`;
+
+  // 检查是否安装了 tmux
+  try {
+    execSync('tmux -V', { stdio: 'ignore' });
+  } catch (error) {
+    console.error('Error: tmux is not installed. Please install tmux to use this command.');
+    process.exit(1);
   }
 
   console.log(`Running project ${projectName} (ID: ${projectId}) in tmux session: ${sessionName}`);
@@ -870,7 +790,7 @@ async function showLogs(project: string | undefined, options: any) {
 /**
  * 处理信号文件
  */
-async function processSignalFile(filePath: string, backend: any, logger: any): Promise<void> {
+async function processSignalFile(filePath: string, router: Router, logger: Logger): Promise<void> {
   try {
     const fileName = path.basename(filePath);
 
@@ -920,7 +840,7 @@ async function processSignalFile(filePath: string, backend: any, logger: any): P
       };
 
       // 调用注册方法
-      await backend.registerProject(projectId, finalConfig);
+      await router.registerProject(projectId, finalConfig);
       logger.info(`Successfully registered project: ${projectId} from signal`);
 
       // 处理完成后删除信号文件
@@ -944,7 +864,7 @@ async function processSignalFile(filePath: string, backend: any, logger: any): P
       }
 
       // 调用注销方法
-      await backend.unregisterProject(projectId);
+      await router.unregisterProject(projectId);
       logger.info(`Successfully unregistered project: ${projectId} from signal`);
 
       // 处理完成后删除信号文件
@@ -962,5 +882,124 @@ async function processSignalFile(filePath: string, backend: any, logger: any): P
     }
   } catch (error) {
     logger.error(`Failed to process signal file ${filePath}:`, error);
+  }
+}
+
+/**
+ * 设置 Claude Code Hooks
+ */
+async function setupHooks(projectPath: string = '.') {
+  const projectDir = path.resolve(projectPath);
+
+  // 检查目录是否存在
+  try {
+    const stats = await fs.stat(projectDir);
+    if (!stats.isDirectory()) {
+      console.error(`Error: ${projectDir} is not a directory`);
+      process.exit(1);
+    }
+  } catch (error) {
+    console.error(`Error: Directory does not exist: ${projectDir}`);
+    process.exit(1);
+  }
+
+  const hooksDir = path.join(projectDir, '.claude', 'hooks');
+  const settingsPath = path.join(projectDir, '.claude', 'settings.json');
+
+  console.log(`Setting up hooks in: ${projectDir}`);
+
+  // 创建 hooks 目录
+  await fs.mkdir(hooksDir, { recursive: true });
+
+  // 复制 shell hook 脚本
+  const hookTemplatePath = path.join(__dirname, 'claude-code-hooks', 'on-response.sh');
+  const hookDestPath = path.join(hooksDir, 'on-response.sh');
+
+  try {
+    await fs.copyFile(hookTemplatePath, hookDestPath);
+    // 确保脚本可执行
+    await fs.chmod(hookDestPath, 0o755);
+    console.log(`✓ Created hook script: ${hookDestPath}`);
+  } catch (error) {
+    console.error(`✗ Failed to copy hook script:`, error);
+    return;
+  }
+
+  // 读取或创建 settings.json
+  const templateSettingsPath = path.join(__dirname, 'claude-code-hooks', 'settings.json');
+  let existingSettings: any = {};
+
+  try {
+    const existingContent = await fs.readFile(settingsPath, 'utf-8');
+    existingSettings = JSON.parse(existingContent);
+  } catch (error) {
+    // 文件不存在，继续
+  }
+
+  // 读取模板 settings.json
+  const templateContent = await fs.readFile(templateSettingsPath, 'utf-8');
+  const templateSettings = JSON.parse(templateContent);
+
+  // 智能合并：同名替换，异名新增
+  for (const [key, value] of Object.entries(templateSettings)) {
+    existingSettings[key] = value;
+  }
+
+  // 写入合并后的 settings.json
+  await fs.writeFile(settingsPath, JSON.stringify(existingSettings, null, 2));
+  console.log(`✓ Updated Claude Code settings: ${settingsPath}`);
+
+  console.log('\nClaude Code hooks setup complete!');
+  console.log('\nTo use:');
+  console.log('1. Ensure the cc-power service is running, : ccpower start');
+  console.log('2. Run your project: ccpower run <path>');
+  console.log('3. Send a message from your chat platform');
+  console.log('4. Claude will process and automatically send the response back');
+}
+
+/**
+ * 处理 Hook 信号文件（用于 Claude Code hooks）
+ */
+async function processHookSignal(filePath: string, router: Router, logger: Logger): Promise<void> {
+  try {
+    let fileContent: string;
+    try {
+      fileContent = await fs.readFile(filePath, 'utf-8');
+    } catch (readError: any) {
+      if (readError.code === 'ENOENT') {
+        logger.debug(`Hook signal file already processed and deleted: ${filePath}`);
+        return;
+      }
+      throw readError;
+    }
+
+    const signal = JSON.parse(fileContent);
+    logger.info(`Received hook signal: ${JSON.stringify(signal)}`);
+    if (signal.type === 'send_message') {
+      const { provider, projectId, chatId, content } = signal;
+
+      const providerInstance = router.getProvider(projectId);
+      if (!providerInstance) {
+        logger.error(`Provider not found for project: ${projectId}`);
+        return;
+      }
+
+      await providerInstance.sendMessage(chatId, content);
+      logger.info(`Hook message sent to ${provider}:${chatId}`);
+    }
+
+    // 处理完成后删除信号文件
+    try {
+      await fs.unlink(filePath);
+      logger.debug(`Deleted processed hook signal file: ${filePath}`);
+    } catch (unlinkError: any) {
+      if (unlinkError.code === 'ENOENT') {
+        logger.debug(`Hook signal file already deleted by another process: ${filePath}`);
+      } else {
+        logger.error(`Failed to delete hook signal file ${filePath}:`, unlinkError);
+      }
+    }
+  } catch (error) {
+    logger.error(`Failed to process hook signal ${filePath}:`, error);
   }
 }

@@ -6,39 +6,10 @@ import type {
   ProviderConfig,
   ProjectConfig,
   IProvider,
-  MCPRequest,
-  MCPCallRequest,
-  MCCToolCall,
-  MCCToolResult,
 } from '../types/index.js';
-
-import * as fs from 'fs/promises';
-import * as path from 'path';
-
-// MCP 相关类型（本地定义，因为这些是 MCP 特定的）
-interface SendMessageArgs {
-  provider: string;
-  chat_id: string;
-  content: string;
-  project_id?: string;
-}
-
-interface ListChatsArgs {
-  provider: string;
-  project_id?: string;
-}
-
-interface GetStatusArgs {
-  provider?: string;
-}
-
-interface GetIncomingMessagesArgs {
-  project_id: string;
-  since?: number;
-}
 import { ConfigManager } from './config.js';
 import { Logger } from './logger.js';
-import { MessageLogger, type MessageLogEntry } from './message-logger.js';
+import { MessageLogger} from './message-logger.js';
 
 /**
  * 路由器
@@ -52,7 +23,7 @@ export class Router implements IRouter {
   private logger: Logger;
   private messageLogger: MessageLogger;
 
-  // 入站消息队列（用于 HTTP 模式）
+  // 入站消息队列
   private incomingMessageQueue = new Map<string, IncomingMessage[]>(); // projectId → messages
 
   // 队列最大长度限制（防止内存泄漏）
@@ -60,9 +31,6 @@ export class Router implements IRouter {
 
   // 消息生存时间（毫秒），超过此时间的消息将被丢弃
   private readonly MESSAGE_TTL = 5 * 60 * 1000; // 5分钟
-
-  // 通知发送器（用于 HTTP 模式）
-  private notificationSender: ((message: any) => Promise<void>) | null = null;
 
   // 定时检查间隔（毫秒）
   private readonly SESSION_POLL_INTERVAL = 60000; // 1 minute
@@ -107,7 +75,7 @@ export class Router implements IRouter {
    * 轮询检查所有注册项目的 Tmux 会话状态
    */
   private async pollTmuxSessions(): Promise<void> {
-    this.logger.debug('Polling tmux sessions for health check...');
+    // this.logger.debug('Polling tmux sessions for health check...');
 
     // Get all registered project IDs
     const projectIds = Array.from(this.projectTmuxSessions.keys());
@@ -142,7 +110,7 @@ export class Router implements IRouter {
           // Unregister the project to trigger cleanup
           await this.unregisterProject(projectId);
         } else {
-          this.logger.debug(`Tmux session ${sessionName} for project ${projectId} is alive`);
+        //   this.logger.debug(`Tmux session ${sessionName} for project ${projectId} is alive`);
         }
       } catch (error) {
         this.logger.error(`Failed to check tmux session ${tmuxPane} for project ${projectId}:`, error);
@@ -158,56 +126,6 @@ export class Router implements IRouter {
     this.logger.info('Message logger initialized');
   }
 
-  /**
-   * 确保项目已注册，如果未注册则尝试从 CWD 加载
-   */
-  private async ensureProjectRegistered(projectId: string): Promise<IProvider | null> {
-    if (this.providers.has(projectId)) {
-      return this.providers.get(projectId)!;
-    }
-
-    // 如果没找到，尝试从 CWD 自动注册
-    try {
-      const cwd = process.cwd();
-      const crypto = await import('crypto');
-      const path = await import('path');
-      const fs = await import('fs/promises');
-      
-      const normalizedPath = path.resolve(cwd).replace(/\/$/, '');
-      const inferredProjectId = crypto.createHash('md5').update(normalizedPath).digest('hex').substring(0, 8);
-
-      if (projectId === inferredProjectId) {
-        // 尝试加载配置并注册
-        let projectConfig: any = null;
-        const configPaths = [
-          path.join(cwd, '.cc-power.yaml'),
-          path.join(cwd, 'config.yaml'),
-        ];
-
-        for (const candidate of configPaths) {
-          try {
-            const content = await fs.readFile(candidate, 'utf-8');
-            const yaml = await import('yaml');
-            projectConfig = yaml.parse(content);
-            break;
-          } catch (error) {
-            continue;
-          }
-        }
-
-        if (projectConfig && projectConfig.provider) {
-          this.logger.info(`Auto-registering project ${projectId} from CWD`);
-          await this.registerProject(projectId, projectConfig);
-          return this.providers.get(projectId) || null;
-        }
-      }
-    } catch (error) {
-      this.logger.error(`Failed to auto-register project ${projectId}:`, error);
-    }
-
-    this.logger.warn(`Project ${projectId} not registered. Use register_project MCP tool to register.`);
-    return null;
-  }
 
   /**
    * 注册项目
@@ -376,13 +294,6 @@ export class Router implements IRouter {
       this.logger.error(`Failed to inject message via Tmux for project ${message.projectId}:`, err);
     });
 
-    // 如果有通知发送器，立即推送通知
-    if (this.notificationSender) {
-      this.sendIncomingMessageNotification(message).catch(error => {
-        this.logger.error('Failed to send incoming message notification:', error);
-      });
-    }
-
     this.logger.info(`Incoming message queued for ${message.projectId}: ${message.content}`);
   }
 
@@ -531,198 +442,6 @@ export class Router implements IRouter {
   }
 
   /**
-   * 处理 MCP 消息
-   */
-  async handleMCPMessage(message: MCPRequest): Promise<void> {
-    this.logger.debug(`MCP message: ${JSON.stringify(message)}`);
-
-    const { method, params } = message;
-
-    switch (method) {
-      case 'tools/call':
-        await this.handleToolCall(params as MCPCallRequest['params']);
-        break;
-
-      default:
-        this.logger.warn(`Unknown MCP method: ${method}`);
-    }
-  }
-
-  /**
-   * 处理 MCP 工具调用
-   */
-  private async handleToolCall(params: {
-    name: string;
-    arguments: Record<string, any>;
-  }): Promise<any> {
-    const { name, arguments: args } = params;
-
-    this.logger.debug(`Tool call: ${name} with args: ${JSON.stringify(args)}`);
-
-    switch (name) {
-      case 'send_message':
-        await this.handleSendMessage(args as SendMessageArgs);
-        return { success: true, message: 'Message sent successfully' };
-
-      case 'list_chats':
-        return await this.handleListChats(args as ListChatsArgs);
-
-      case 'get_status':
-        return await this.handleGetStatus(args as GetStatusArgs);
-
-      case 'get_incoming_messages':
-        return await this.handleGetIncomingMessages(args as GetIncomingMessagesArgs);
-
-      default:
-        this.logger.warn(`Unknown tool: ${name}`);
-        return { error: `Unknown tool: ${name}` };
-    }
-  }
-
-  /**
-   * 处理 send_message 工具调用
-   */
-  async handleSendMessage(args: SendMessageArgs): Promise<any> {
-    const { provider, chat_id: chatId, content, project_id: projectId } = args;
-
-    // 如果指定了项目 ID，确保项目已注册
-    let targetProjectId = projectId;
-
-    if (!targetProjectId) {
-      // 根据聊天 ID 查找项目
-      const route = this.projectRoutes.get(chatId);
-      if (!route) {
-        throw new Error(`No project found for chat: ${chatId}. Please specify project_id.`);
-      }
-      targetProjectId = route.projectId;
-    }
-
-    // 确保项目已注册
-    const providerInstance = await this.ensureProjectRegistered(targetProjectId);
-    if (!providerInstance) {
-      throw new Error(`Failed to load provider for project: ${targetProjectId}`);
-    }
-
-    // 发送消息
-    const outgoingMessage: OutgoingMessage = {
-      type: 'outgoing',
-      provider,
-      projectId: targetProjectId,
-      chatId,
-      content,
-      timestamp: Date.now(),
-    };
-
-    await this._sendMessageToProvider(outgoingMessage);
-
-    this.logger.info(`Message sent to ${provider}:${chatId}`);
-
-    return { success: true, message: 'Message sent successfully' };
-  }
-
-  /**
-   * 处理 list_chats 工具调用
-   */
-  async handleListChats(args: ListChatsArgs): Promise<any> {
-    const { provider, project_id: projectId } = args;
-
-    // 获取指定项目的 Provider
-    let targetProjectId = projectId;
-    if (!targetProjectId) {
-      // 如果没有指定项目 ID，尝试从已注册的项目中查找
-      for (const [pid, prov] of this.providers) {
-        const provName = (prov as any).name || 'unknown';
-        if (provName === provider) {
-          targetProjectId = pid;
-          break;
-        }
-      }
-    }
-
-    if (!targetProjectId) {
-      return {
-        error: `No project found for provider: ${provider}. Please specify project_id.`,
-      };
-    }
-
-    // 确保项目已注册
-    const providerInstance = await this.ensureProjectRegistered(targetProjectId);
-    if (!providerInstance) {
-      return {
-        error: `Failed to load provider for project: ${targetProjectId}`,
-      };
-    }
-
-    // 返回路由列表
-    const chats = Array.from(this.projectRoutes.values())
-      .filter(route => route.provider === provider)
-      .map(route => ({
-        chat_id: route.chatId,
-        project_id: route.projectId,
-        user_id: route.userId,
-      }));
-
-    return { chats };
-  }
-
-  /**
-   * 处理 get_status 工具调用
-   */
-  async handleGetStatus(args: GetStatusArgs): Promise<any> {
-    const { provider } = args;
-    this.logger.debug(`Tool call: get_status`, args);
-
-    const status: Record<string, any> = {};
-
-    for (const [projectId, prov] of this.providers) {
-      const provName = (prov as any).name || 'unknown';
-      if (provider && provName !== provider) {
-        continue;
-      }
-
-      // 获取当前项目在队列中的待处理消息数
-      const queueLength = this.incomingMessageQueue.get(projectId)?.length || 0;
-
-      status[projectId] = {
-        provider: provName,
-        connected: true, // Assuming true if it's in the providers map
-        queueLength,
-        tmuxPane: this.projectTmuxSessions.get(projectId),
-      };
-    }
-
-    this.logger.info(`Retrieved status for ${Object.keys(status).length} projects`);
-    return status;
-  }
-
-  /**
-   * 处理 get_incoming_messages 工具调用
-   */
-  async handleGetIncomingMessages(args: GetIncomingMessagesArgs): Promise<any> {
-    const { project_id: projectId, since } = args;
-
-    const messages = await this.getIncomingMessages({ project_id: projectId, since });
-
-    return {
-      project_id: projectId,
-      messages,
-      count: messages.length,
-    };
-  }
-
-  /**
-   * 发送消息（BackendService 接口实现）
-   */
-  async sendMessage(args: {
-    provider: string;
-    chat_id: string;
-    content: string;
-    project_id?: string;
-  }): Promise<any> {
-    return await this.handleSendMessage(args);
-  }
-
-  /**
    * 内部发送消息到 Provider
    */
   async _sendMessageToProvider(message: OutgoingMessage): Promise<void> {
@@ -776,62 +495,9 @@ export class Router implements IRouter {
   }
 
   /**
-   * 设置通知发送器（用于 HTTP 模式）
+   * 获取入站消息（用于测试）
    */
-  setNotificationSender(sender: (message: any) => Promise<void>): void {
-    this.notificationSender = sender;
-    this.logger.debug('Notification sender set');
-  }
-
-  /**
-   * 发送入站消息通知
-   */
-  private async sendIncomingMessageNotification(message: IncomingMessage): Promise<void> {
-    if (!this.notificationSender) {
-      return;
-    }
-
-    const notification = {
-      jsonrpc: '2.0',
-      method: 'notifications/message',
-      params: {
-        type: 'incoming',
-        provider: message.provider,
-        project_id: message.projectId,
-        chat_id: message.chatId,
-        user_id: message.userId,
-        user_name: message.userName,
-        content: message.content,
-        timestamp: message.timestamp,
-        metadata: message.metadata,
-      },
-    };
-
-    await this.notificationSender(notification);
-    this.logger.debug(`Notification sent for message from ${message.chatId}`);
-  }
-
-  /**
-   * 获取入站消息
-   */
-  async getIncomingMessages(args: GetIncomingMessagesArgs): Promise<any[]> {
-    const { project_id: projectId, since } = args;
-    const queue = this.incomingMessageQueue.get(projectId) || [];
-
-    // 创建副本避免修改原队列
-    let messages = [...queue];
-
-    // 如果指定了 since 时间戳，只返回该时间之后的消息
-    if (since) {
-      messages = messages.filter(msg => msg.timestamp > since);
-    }
-
-    // 清理过期消息
-    this.cleanupExpiredMessages(queue);
-
-    // 清空队列（返回的消息已被消费）
-    this.incomingMessageQueue.set(projectId, []);
-
-    return messages;
+  getIncomingMessages(projectId: string): IncomingMessage[] {
+    return this.incomingMessageQueue.get(projectId) || [];
   }
 }

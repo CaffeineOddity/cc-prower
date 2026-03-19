@@ -1,6 +1,7 @@
 # Telegram Provider Configuration
 
 provider: telegram
+project_id: my-project-name  # Required: Unique project identifier
 
 telegram:
   bot_token: "your_bot_token_here"

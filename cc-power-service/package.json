@@ -1,12 +1,12 @@
 {
   "name": "cc-power",
   "version": "1.0.0",
-  "description": "Lightweight bridge between Claude Code and chat platforms - Service Core",
+  "description": "Lightweight bridge between Claude Code and chat platforms - Hooks mode only",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "scripts": {
-    "build": "tsc && chmod +x dist/cli.js",
+    "build": "tsc && chmod +x dist/cli.js && mkdir -p dist/claude-code-hooks && cp claude-code-hooks/settings.json dist/claude-code-hooks/settings.json && cp claude-code-hooks/on-response.sh dist/claude-code-hooks/on-response.sh",
     "dev": "tsx cli.ts start",
     "start": "node dist/cli.js start",
     "cli": "tsx cli.ts",
@@ -28,7 +28,6 @@
   "dependencies": {
     "@larksuiteoapi/node-sdk": "^1.59.0",
     "@types/write-file-atomic": "^4.0.3",
-    "cc-power-mcp": "workspace:*",
     "chokidar": "^5.0.0",
     "commander": "^13.0.0",
     "eventemitter3": "^5.0.1",

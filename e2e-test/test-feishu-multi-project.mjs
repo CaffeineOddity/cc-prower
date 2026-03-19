@@ -7,7 +7,7 @@
  * 3. 关键词过滤
  */
 
-import { FeishuConnectionManager } from '../cc-power/core/feishu-connection-manager.js';
+import { FeishuConnectionManager } from '../cc-power/providers/feishu-connection-manager.js';
 import { Logger } from '../cc-power/core/logger.js';
 import * as fs from 'fs/promises';
 

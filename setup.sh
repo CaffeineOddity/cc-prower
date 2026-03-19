@@ -41,7 +41,7 @@ show_usage() {
 check_directory() {
     local current_dir
     current_dir=$(pwd)
-    if [ ! -f "pnpm-workspace.yaml" ] || [ ! -d "cc-power-service" ] || [ ! -d "cc-power-mcp" ]; then
+    if [ ! -f "pnpm-workspace.yaml" ] || [ ! -d "cc-power-service" ]; then
         print_error "请在项目根目录运行此脚本（需包含 pnpm-workspace.yaml 等文件）"
         echo "当前目录: $current_dir"
         show_usage
@@ -51,7 +51,7 @@ check_directory() {
     # 检查并自动安装 tmux
     if ! command -v tmux &> /dev/null; then
         print_info "未检测到 tmux，尝试自动安装..."
-        
+
         # 获取操作系统类型
         OS="$(uname -s)"
         case "${OS}" in
@@ -118,36 +118,14 @@ install_global() {
         print_info "检测到已安装的 ${CLI_NAME}，正在卸载..."
         npm unlink -g "$CLI_NAME" > /dev/null 2>&1 || true
         cd cc-power-service && npm unlink -g > /dev/null 2>&1 || true && cd ..
-        cd cc-power-mcp && npm unlink -g > /dev/null 2>&1 || true && cd ..
         print_success "旧安装已清理"
     fi
 
     print_info "正在全局安装 ${CLI_NAME}..."
-    cd cc-power-mcp && npm link && cd ..
-    cd cc-power-service && npm link cc-power-mcp && npm link && cd ..
+    cd cc-power-service && npm link && cd ..
     print_success "${CLI_NAME} 已全局安装"
 }
 
-# 配置 MCP 服务器
-configure_mcp() {
-    print_info "正在配置 Claude MCP..."
-
-    # 总是先移除旧配置
-    if claude mcp list 2>&1 | grep -q "cc-power-mcp"; then
-        print_info "检测到已存在的 cc-power-mcp 配置，正在清理..."
-        claude mcp remove "cc-power-mcp" > /dev/null 2>&1 || true
-        print_success "旧 MCP 配置已清理"
-    fi
-
-    # 添加新配置
-    print_info "正在添加新的 MCP 配置..."
-    if claude mcp add "cc-power-mcp" -- "ccpower" start --stdio > /dev/null 2>&1; then
-        print_success "Claude MCP 配置成功！"
-    else
-        print_warning "Claude MCP 配置失败。可能是 'claude' 命令不可用，或者需要手动配置。"
-        print_info "你可以手动运行: claude mcp add cc-power-mcp -- ccpower start --stdio"
-    fi
-}
 verify_installation() {
     if command -v "$CLI_NAME" &> /dev/null; then
         print_success "${CLI_NAME} 已安装: $(which "$CLI_NAME")"
@@ -161,37 +139,36 @@ verify_installation() {
 # 协调执行各个步骤
 main() {
     check_directory
-    
+
     echo ""
     echo "======================================"
     echo "  ${CLI_NAME} 开发者配置"
     echo "======================================"
     echo ""
-    
+
     print_info "当前目录: $(pwd)"
-    
+
     build_project
     install_global
-    configure_mcp
     verify_installation
-    
+
     echo ""
-    print_success "开发者配置完成！"
+    print_success "环境配置完成！使用方法："
+    echo "  1. 启动 cc-power 服务: ccpower start"
+    echo "  2. 在你的项目目录设置 hooks: ccpower setup-hooks [project_path]"
+    echo "     (不指定路径则在当前目录设置，也可以指定 . 或其他路径)"
+    echo "  3. 运行你的项目: ccpower run . --skip-ask or ccpower run <project_dir> --skip-ask"
+    echo "  4. 从聊天平台发送消息，Claude 会自动处理并回复"
     echo ""
-    print_warning "重要：请按以下步骤完成设置"
+
+    # 询问是否启动服务
+    local prompt="${GREEN}是否现在启动 cc-power 服务? (y/enter退出)${NC}"
+    read -p "$(echo -e "$prompt")" -n 1 -r
     echo ""
-    echo "  1. 重启 Claude Code 以加载新的 MCP 配置"
-    echo "     - 退出当前 Claude Code 会话"
-    echo "     - 重新打开项目"
-    echo ""
-    echo "  2. 重新启动所有 cc-power 相关服务"
-    echo "     - 关闭所有旧的 ccpower 进程: pkill -f ccpower"
-    echo "     - 启动新的 MCP 服务: ccpower start --stdio"
-    echo ""
-    echo "  3. 重新运行项目"
-    echo "     - 进入你的项目目录"
-    echo "     - 运行 ccpower run ."
-    echo ""
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
+        print_info "正在启动 cc-power 服务..."
+        ccpower start
+    fi
 }
 
 # 执行主函数

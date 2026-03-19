@@ -1,7 +1,7 @@
 import * as lark from '@larksuiteoapi/node-sdk';
 import { BaseProvider } from './base.js';
 import type { IncomingMessage, ProviderConfig, FeishuConfig } from '../types/index.js';
-import { FeishuConnectionManager } from '../core/feishu-connection-manager.js';
+import { FeishuConnectionManager } from './feishu-connection-manager.js';
 import { Logger } from '../core/logger.js';
 
 /**

@@ -1,6 +1,7 @@
 # WhatsApp Provider Configuration
 
 provider: whatsapp
+project_id: my-project-name  # Required: Unique project identifier
 
 whatsapp:
   phone_number: "your_phone_number_id_here"

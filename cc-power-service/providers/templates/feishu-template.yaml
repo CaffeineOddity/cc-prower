@@ -1,8 +1,7 @@
 # Feishu Provider Configuration
-
-provider: feishu
-
-feishu:
+project_id: my-project-name  # Required: Unique project identifier
+provider:
+  name: feishu
   app_id: "cli_app_id_here"
   app_secret: "your_app_secret_here"
   chat_id: "oc_chat_id_here"
