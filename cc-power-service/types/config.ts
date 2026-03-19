@@ -78,7 +78,6 @@ export interface WhatsAppConfig extends ProviderConfig {
 export interface IConfigManager {
   load(path: string): Promise<GlobalConfig>;
   loadProject(projectId: string): Promise<ProjectConfig | null>;
-  watch(callback: (projectId: string, config: ProjectConfig) => void): void;
   getGlobalConfig(): GlobalConfig | null;
   isProviderEnabled(provider: ProviderType): boolean;
   clearCache(): void;
