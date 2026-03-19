@@ -6,4 +6,5 @@ export { RunCommand } from './run.command.js';
 export { LogsCommand } from './logs.command.js';
 export { SetupHooksCommand } from './setup-hooks.command.js';
 export { StartCommand } from './start.command.js';
+export { StopCommand } from './stop.command.js';
 export { UninstallCommand } from './uninstall.command.js';

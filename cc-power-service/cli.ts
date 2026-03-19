@@ -2,6 +2,7 @@
 import { Command } from 'commander';
 import {
   StartCommand,
+  StopCommand,
   InitCommand,
   ValidateCommand,
   RunCommand,
@@ -24,6 +25,7 @@ program
 // 注册所有命令
 const commands = [
   new StartCommand(program),
+  new StopCommand(program),
   new InitCommand(program),
   new ValidateCommand(program),
   new RunCommand(program),
