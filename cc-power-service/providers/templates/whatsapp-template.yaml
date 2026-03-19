@@ -1,9 +1,8 @@
 # WhatsApp Provider Configuration
-
-provider: whatsapp
 project_id: my-project-name  # Required: Unique project identifier
 
-whatsapp:
+provider:
+  name: whatsapp
   phone_number: "your_phone_number_id_here"
   api_key: "your_api_key_here"
   chat_id: "+1234567890"

@@ -6,6 +6,7 @@ import type {
   ProviderConfig,
   ProjectConfig,
   IProvider,
+  ProviderConfigBase,
 } from '../types/index.js';
 import { ConfigManager } from './config.js';
 import { Logger } from './logger.js';
@@ -132,7 +133,22 @@ export class Router implements IRouter {
    */
   async registerProject(projectId: string, config: ProjectConfig): Promise<void> {
     const { provider } = config;
-    const providerType = provider;
+
+    // 支持新旧两种 provider 格式
+    let providerType: string;
+    let providerSpecificConfig: any = {};
+
+    if (typeof provider === 'string') {
+      // 旧格式: provider: "feishu", feishu: { ... }
+      providerType = provider;
+      providerSpecificConfig = config[provider] || {};
+    } else if (provider && typeof provider === 'object' && 'name' in provider) {
+      // 新格式: provider: { name: "feishu", app_id: "...", ... }
+      providerType = provider.name;
+      providerSpecificConfig = provider;
+    } else {
+      throw new Error(`Invalid provider configuration for project: ${projectId}`);
+    }
 
     // 验证 Provider 是否启用
     if (!this.configManager.isProviderEnabled(providerType as any)) {
@@ -155,12 +171,10 @@ export class Router implements IRouter {
     }
 
     // 构建 ProviderConfig
-    // 我们需要将特定的 provider 配置（例如 config.feishu）展开到顶层
-    const providerSpecificConfig = config[providerType] || {};
+    // 新格式：provider 对象包含所有配置；旧格式：从 config[providerType] 提取
     const providerConfig: ProviderConfig = {
       type: providerType,
       projectId,
-      ...config,
       ...providerSpecificConfig,
     };
 

@@ -24,11 +24,17 @@ export interface ProvidersConfig {
   whatsapp?: { enabled: boolean };
 }
 
+// Provider 配置基类（嵌套格式）
+export interface ProviderConfigBase {
+  name: ProviderType;
+  [key: string]: any; // Provider 特定配置
+}
+
 // 项目配置
 export interface ProjectConfig {
-  provider: ProviderType;
+  provider: ProviderType | ProviderConfigBase; // 兼容新旧格式
   session?: SessionConfig;
-  [key: string]: any; // Provider 特定配置
+  [key: string]: any; // Provider 特定配置（旧格式）
 }
 
 export interface SessionConfig {
