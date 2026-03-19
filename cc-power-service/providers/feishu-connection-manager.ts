@@ -1,5 +1,5 @@
 import * as lark from '@larksuiteoapi/node-sdk';
-import { Logger } from './logger.js';
+import { Logger } from '../core/logger.js';
 
 /**
  * Provider 注册信息
