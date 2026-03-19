@@ -14,6 +14,8 @@ export class FeishuProvider extends BaseProvider {
   private providerId: string | null = null;
   private logger: Logger;
   private userNameCache: Map<string, string> = new Map();
+  private appId: string = '';
+  private chatId: string = '';
 
   constructor() {
     super('feishu');
@@ -35,6 +37,10 @@ export class FeishuProvider extends BaseProvider {
       throw new Error('Feishu configuration missing chat_id');
     }
 
+    // 保存 appId 和 chatId 供后续使用
+    this.appId = appId;
+    this.chatId = chatId;
+
     // 使用连接管理器获取 WebSocket 连接和 API Client
     this.logger.info(`Attempting to get or connect WebSocket for app_id: ${appId}`);
     const { apiClient, eventDispatcher } = await this.connectionManager.getOrConnect(appId, appSecret);
@@ -48,7 +54,7 @@ export class FeishuProvider extends BaseProvider {
       chatId,
       priority,
       keyword,
-      (data) => this.handleWsMessage(data)
+      (data) => this.handleWsMessage(data, config)
     );
 
     this.connected = true;
@@ -80,24 +86,24 @@ export class FeishuProvider extends BaseProvider {
     return 'Unknown';
   }
 
-  private handleWsMessage(data: { message: any; sender?: any }): void {
+  private handleWsMessage(data: { message: any; sender?: any }, config?: any): void {
     const message = data.message;
     const sender = data.sender;
-    
+
     if (message && (message.msg_type === 'text' || message.message_type === 'text')) {
       this.logger.info(`handleIncomingMessage: ${data}`);
-      this.handleIncomingMessage(message, sender);
+      this.handleIncomingMessage(message, sender, config);
     } else {
         this.logger.info(`[Feishu] Ignoring non-text message: ${JSON.stringify(message)}`);
     }
   }
 
-  private async handleIncomingMessage(message: any, sender?: any): Promise<void> {
+  private async handleIncomingMessage(message: any, sender?: any, config?: any): Promise<void> {
     try {
 
       const content = JSON.parse(message.content);
       let textContent = content.text || '';
-      
+
       // 移除提及（mentions），例如 "@_user_1 "
       if (message.mentions && Array.isArray(message.mentions)) {
         message.mentions.forEach((mention: any) => {
@@ -117,14 +123,14 @@ export class FeishuProvider extends BaseProvider {
       const actualSender = sender || message.sender;
       const senderId = actualSender?.sender_id || actualSender?.id || {};
       const userId = senderId.open_id || senderId.union_id || 'unknown';
-      
+
       const senderName = await this.getUserName(userId);
       this.logger.info(`[Feishu] Received message from ${senderName}: ${textContent}`);
 
       const incomingMessage: IncomingMessage = {
         type: 'incoming',
         provider: 'feishu',
-        projectId: this.config?.projectId || '',
+        projectId: this.config?.projectId || config?.projectId || '',
         chatId: message.chat_id,
         userId: userId,
         userName: senderName,
@@ -133,6 +139,7 @@ export class FeishuProvider extends BaseProvider {
         metadata: {
           message_id: message.message_id,
           message_type: message.message_type || message.msg_type,
+          app_id: config?.app_id || '',
         },
       };
 

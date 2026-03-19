@@ -369,26 +369,36 @@ export class Router implements IRouter {
       const execAsync = promisify(exec);
 
       // 获取所有面板的信息并找到匹配的
-      // -a 列表所有会话
-      // tmuxPane 格式如 cc-p-e35341e7:0
-      const paneInfoResult = await execAsync(`tmux list-panes -a -F '#{session_name}:#{window_index} #{pane_pid}:#{pane_current_command}' 2>/dev/null || true`);
+      // 格式: session:window_index pane_index:pane_pid:pane_current_command
+      // tmuxPane 格式如 cc-p-e35341e7:0 (session:window，pane 默认为 0)
+      const paneInfoResult = await execAsync(`tmux list-panes -a -F '#{session_name}:#{window_index} #{pane_index}:#{pane_pid}:#{pane_current_command}' 2>/dev/null || true`);
       const paneInfo = paneInfoResult.stdout.toString().trim();
 
       // 提取当前命令（通常是前台进程名）
       const lines = paneInfo.split('\n');
-      const currentCommandLine = lines.find(line => line.startsWith(tmuxPane));
+
+      // 解析 tmuxPane: session:window
+      const [sessionTarget, windowTarget] = tmuxPane.split(':');
+      const paneTarget = '0'; // 默认使用第一个 pane
+
+      this.logger.debug(`Looking for tmux pane: session=${sessionTarget}, window=${windowTarget}, pane=${paneTarget}`);
+
+      // 查找匹配的 pane 信息行
+      const currentCommandLine = lines.find(line => {
+        const [sessionName, windowIndex, paneIndex] = line.split(' ');
+        return sessionName === sessionTarget && windowIndex === windowTarget && paneIndex === paneTarget;
+      });
 
       if (currentCommandLine) {
-        // currentCommandLine 类似: cc-p-e35341e7:0 96915:node
         const parts = currentCommandLine.split(' ');
         if (parts.length > 1) {
-          const currentCommand = parts[1].split(':')[1]?.toLowerCase() || '';
+          const currentCommand = parts[3].split(':')[1]?.toLowerCase() || '';
 
           // node 环境运行的可能是 claude，所以我们需要包含 node
           // 在 Claude Code 运行时，某些系统的 pane_current_command 会直接返回 Claude 的版本号（例如 '2.1.78'）
           // 因此我们使用正则来匹配类似数字开头的版本号格式
           const isClaudeVersion = /^\d+\.\d+\.\d+/.test(currentCommand.trim());
-          
+
           if (!['claude', 'node', 'bash', 'zsh', 'sh'].includes(currentCommand.trim()) && !isClaudeVersion) {
             this.logger.warn(`Unsafe process detected in tmux pane ${tmuxPane}. Current command: ${currentCommand}. Injection paused for safety.`);
             return;
@@ -425,7 +435,15 @@ export class Router implements IRouter {
       // 使用 tmux send-keys 注入文本并模拟按下回车
       // 对于长文本，使用单引号包裹 prompt 并进行适当转义
       const escapedPrompt = prompt.replace(/'/g, "'\\''");
-      await execAsync(`tmux send-keys -t ${tmuxPane} '${escapedPrompt}' Enter`);
+
+      // 构建 send-keys 命令，精确指定目标 pane
+      // tmuxPane 格式: "session:window.pane" (e.g., "cc-p-space-ship:0")
+      const sendKeysCmd = `tmux send-keys -t ${tmuxPane} '${escapedPrompt}' Enter`;
+
+      this.logger.info(`Injecting message to tmux pane ${tmuxPane} for project ${message.projectId}`);
+      this.logger.debug(`Send-keys command: ${sendKeysCmd}`);
+
+      await execAsync(sendKeysCmd);
       this.logger.info(`Successfully injected message to tmux pane ${tmuxPane}`);
     } catch (error) {
       this.logger.error(`Tmux injection failed for pane ${tmuxPane}:`, error);

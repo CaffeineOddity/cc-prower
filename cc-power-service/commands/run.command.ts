@@ -144,7 +144,13 @@ export class RunCommand extends BaseCommand {
     }
 
     const projectId = projectConfig.project_id;
-    const sessionName = session || `cc-p-${projectId}`;
+    const app_id = projectConfig.provider?.app_id || projectConfig.app_id || '';
+    const chat_id = projectConfig.provider?.chat_id || projectConfig.chat_id || '';
+
+    // 使用 app_id + chat_id 生成唯一的 session 标识
+    // 确保不同的 app_id 或 chat_id 有不同的 session
+    const uniqueId = app_id ? `${app_id.substring(0, 8)}-${chat_id.substring(0, 8)}` : projectId;
+    const sessionName = session || `cc-p-${uniqueId}`;
 
     // 检查 tmux
     checkTmuxInstalled();
