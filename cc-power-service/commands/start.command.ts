@@ -181,13 +181,11 @@ export class StartCommand extends BaseCommand {
         return;
     }
 
-    const finalConfig = {
-      ...projectConfig,
-      tmuxPane: signal.tmuxPane,
-    };
+    
+    signal.config = projectConfig;
 
     // 不再需要 projectId，由 router 自动生成
-    await this.router.registerProject(undefined, finalConfig);
+    await this.router.registerProject(signal);
     this.logger.info(`Successfully registered project from signal: ${signal.projectName}`);
 
     await fs.unlink(filePath).catch(() => {});

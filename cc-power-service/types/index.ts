@@ -16,6 +16,7 @@ import type {
 import type {
   TemplateProviderConfig
 } from './provider.config.js';
+import { RegisterSignal } from '../utils/signals.js';
 
 // Provider 基类接口
 export interface IProvider {
@@ -30,7 +31,7 @@ export interface IProvider {
 
 // 路由器接口
 export interface IRouter {
-  registerProject(projectId: string, config: ProjectConfig): Promise<void>;
+  registerProject(config: RegisterSignal): Promise<void>;
   unregisterProject(projectId: string): Promise<void>;
   route(message: IncomingMessage | OutgoingMessage): Promise<void>;
 }
