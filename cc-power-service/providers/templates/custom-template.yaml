@@ -1,0 +1,13 @@
+# Custom Provider Configuration
+project_name: My Custom App  # Optional: Project name for display and tmux session
+
+provider:
+  name: custom
+  app_id: "my-app-v1"           # 应用标识，用于 WebSocket 握手和路由
+  api_key: "your_api_key_here"  # 认证密钥，用于 WebSocket 握手
+  priority: 10
+  keyword: ""                   # Optional: only trigger if message contains this keyword
+
+session:
+  max_history: 50
+  timeout_minutes: 30

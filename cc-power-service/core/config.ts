@@ -46,7 +46,8 @@ export class ConfigManager implements IConfigManager {
     // 设置默认值
     const finalConfig: GlobalConfig = {
       logging: config.logging || { level: 'info' },
-      providers: config.providers || { feishu: { enabled: true } }
+      providers: config.providers || { feishu: { enabled: true } },
+      WebSocket: config.WebSocket || { port: 8080, host: '127.0.0.1' }
     };
 
     this.globalConfig = finalConfig;

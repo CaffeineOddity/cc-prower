@@ -3,7 +3,7 @@
  */
 
 // Provider 类型定义
-export type ProviderType = 'feishu' | 'telegram' | 'whatsapp';
+export type ProviderType = 'feishu' | 'telegram' | 'whatsapp' | 'custom';
 export interface ProviderConfig {
     name: ProviderType;
 }
@@ -13,6 +13,7 @@ export interface ProvidersConfig {
   feishu?: { enabled: boolean };
   telegram?: { enabled: boolean };
   whatsapp?: { enabled: boolean };
+  custom?: { enabled: boolean };
 }
 
 // Provider 特定配置
@@ -46,10 +47,20 @@ export interface WhatsAppConfig extends ProviderConfig {
   allowed_numbers?: string[];
 }
 
+export interface CustomConfig extends ProviderConfig {
+  name: 'custom';
+  app_id: string;           // 应用标识
+  api_key: string;          // 认证密钥
+  priority?: number;
+  keyword?: string;
+}
+
 // Provider 配置（运行时使用）
+export type ProviderConfigUnion = FeishuConfig | TelegramConfig | WhatsAppConfig | CustomConfig;
+
 export interface TemplateProviderConfig {
   project_name: string; // 项目名称，用于标识不同的项目
-  provider: FeishuConfig | TelegramConfig | WhatsAppConfig;
+  provider: ProviderConfigUnion;
 }
 
 export interface FeishuTemplateConfig extends TemplateProviderConfig {
@@ -64,6 +75,10 @@ export interface WhatsAppTemplateConfig extends TemplateProviderConfig {
   provider: WhatsAppConfig;
 }
 
+export interface CustomTemplateConfig extends TemplateProviderConfig {
+  provider: CustomConfig;
+}
+
 export function get_project_id(template: TemplateProviderConfig): string {
     if (template.provider.name === 'feishu') {
         return  `${template.provider.app_id}-${template.provider.chat_id}`;
@@ -73,6 +88,9 @@ export function get_project_id(template: TemplateProviderConfig): string {
     }
     if (template.provider.name === 'whatsapp') {
         return  `${template.provider.phone_number}-${template.provider.chat_id}`;
+    }
+    if (template.provider.name === 'custom') {
+        return  `${template.provider.app_id}-${template.project_name}`;
     }
   return template.project_name;
 }

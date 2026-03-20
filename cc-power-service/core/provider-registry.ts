@@ -49,7 +49,16 @@ export class ProviderRegistry {
 
     // 动态导入 Provider
     const ProviderModule = await this.loadProvider(providerType);
-    const providerInstance = new ProviderModule(this.logger) as IProvider;
+
+    // 创建 Provider 实例
+    let providerInstance: IProvider;
+    if (typeof ProviderModule === 'function') {
+      // CustomProvider 需要传入 configManager
+      providerInstance = ProviderModule(this.logger) as IProvider;
+    } else {
+      // 其他 Provider 使用标准构造函数
+      providerInstance = new ProviderModule(this.logger) as IProvider;
+    }
 
     // 调用 connect，让 Provider 生成自己的 projectId
     try {
@@ -145,7 +154,15 @@ export class ProviderRegistry {
   private async loadProvider(type: string): Promise<any> {
     const providerPath = `../providers/${type}.js`;
     const module = await import(providerPath);
-    return module.default || module[`${type.charAt(0).toUpperCase() + type.slice(1)}Provider`];
+
+    // CustomProvider 需要额外的 configManager 参数
+    if (type === 'custom') {
+      return (logger: Logger) => new module.CustomProvider(this.configManager, logger);
+    }
+
+    // 其他 Provider 使用标准构造函数
+    const ProviderClass = module.default || module[`${type.charAt(0).toUpperCase() + type.slice(1)}Provider`];
+    return ProviderClass;
   }
 
   /**
