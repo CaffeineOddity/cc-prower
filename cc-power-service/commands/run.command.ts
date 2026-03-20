@@ -1,7 +1,7 @@
-import * as fs from 'fs/promises';
+// import * as fs from 'fs/promises';
 import * as path from 'path';
 import { spawn } from 'child_process';
-import { BaseCommand } from './base.command.js';
+import { BaseCommand,get_project_config_template } from './base.command.js';
 import { checkTmuxInstalled, tmuxSessionExists, createTmuxSession } from '../utils/tmux.js';
 import { createRegisterSignal, createUnregisterSignal } from '../utils/signals.js';
 import { recordProjectHistory } from '../utils/history.js';
@@ -23,7 +23,8 @@ export class RunCommand extends BaseCommand {
       .command(this.getName())
       .description(this.getDescription())
       .argument('<path>', 'Path to project directory')
-      .allowUnknownOption(true)
+      .allowUnknownOption()
+      .allowExcessArguments()
       .action(async (projectPath, options, command) => {
         const claudeArgs = this.parseClaudeArgs(projectPath);
         await this.execute(projectPath, claudeArgs);
@@ -58,34 +59,18 @@ export class RunCommand extends BaseCommand {
 
   async execute(projectPath: string, claudeArgs: string[] = []): Promise<void> {
     const absProjectPath = path.resolve(projectPath);
-    const projectName = path.basename(absProjectPath);
 
-    // 尝试加载项目配置
-    const configPaths = [
-      path.join(absProjectPath, '.cc-power.yaml'),
-      path.join(absProjectPath, 'config.yaml'),
-    ];
-
-    let projectConfig: any = null;
-    for (const candidate of configPaths) {
-      try {
-        const content = await fs.readFile(candidate, 'utf-8');
-        const yaml = await import('yaml');
-        projectConfig = yaml.parse(content);
-        break;
-      } catch (error) {
-        continue;
-      }
-    }
+    let projectConfig = await get_project_config_template(projectPath);
+    // this.logger.error(`excute get config: ${projectPath} projectConfig: ${JSON.stringify(projectConfig)}`);
 
     if (!projectConfig) {
-      console.error(`Error: No .cc-power.yaml found in ${absProjectPath}`);
-      console.error('Please run "ccpower init" to create a project config file.');
+      
+      this.logger.error('Please run "ccpower init" to create a project config file.');
       process.exit(1);
     }
 
     // 获取项目名称（用于 tmux session）
-    const project_name = projectConfig.project_name || projectName;
+    const project_name = projectConfig.project_name;
 
     // 规范化项目名称：移除或替换 tmux 不支持的字符
     const safeProjectName = project_name.replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -96,15 +81,15 @@ export class RunCommand extends BaseCommand {
     // 检查 tmux
     checkTmuxInstalled();
 
-    console.log(`Running project ${projectName} [${project_name}] in tmux session: ${sessionName}`);
+    this.logger.info(`Running project [${project_name}] in tmux session: ${sessionName}`);
 
     // 检查 session 是否存在
     const sessionExists = tmuxSessionExists(sessionName);
 
     if (sessionExists) {
-      console.log(`Attaching to existing session: ${sessionName}`);
+      this.logger.info(`Attaching to existing session: ${sessionName}`);
     } else {
-      console.log(`Creating new session: ${sessionName}`);
+      this.logger.info(`Creating new session: ${sessionName}`);
 
       // 构建 claude 命令
       let claudeCmd = 'claude';
@@ -116,7 +101,7 @@ export class RunCommand extends BaseCommand {
       createTmuxSession(sessionName, absProjectPath, claudeCmd);
 
       // 生成注册信号（使用 project_name）
-      await createRegisterSignal(null, sessionName, absProjectPath, projectConfig);
+      await createRegisterSignal(sessionName, absProjectPath, projectConfig);
 
       // 记录项目历史
       await recordProjectHistory(null, absProjectPath, projectConfig, sessionName);
@@ -130,11 +115,11 @@ export class RunCommand extends BaseCommand {
 
     attach.on('close', async (code: number | null) => {
       if (code !== 0) {
-        console.log(`Tmux session detached with code ${code}`);
+        this.logger.info(`Tmux session detached with code ${code}`);
       }
-
+    //   this.logger.info(`close tmux session: ${sessionName} config: ${JSON.stringify(projectConfig)}`);
       // 退出时生成注销信号
-      await createUnregisterSignal(null);
+      await createUnregisterSignal(projectConfig);
     });
   }
 }

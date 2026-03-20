@@ -1,6 +1,6 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { MessageLogger } from '../core/message-logger.js';
+import { MessageLogger } from '../utils/message-logger.js';
 import { BaseCommand } from './base.command.js';
 
 /**
@@ -35,10 +35,14 @@ export class LogsCommand extends BaseCommand {
 
     await messageLogger.initialize();
 
+    this.logger.info('Message logger initialized');
+
     if (!project) {
+      this.logger.info('Listing all projects with message logs');
       const projects = await messageLogger.listProjects();
       if (projects.length === 0) {
         console.log('No message logs found.');
+        this.logger.warn('No message logs found');
         return;
       }
 
@@ -46,6 +50,7 @@ export class LogsCommand extends BaseCommand {
       for (const p of projects) {
         const logs = await messageLogger.getProjectLogs(p);
         console.log(`  - ${p} (${logs.length} messages)`);
+        this.logger.info(`Project ${p}: ${logs.length} messages`);
       }
       return;
     }
@@ -55,6 +60,7 @@ export class LogsCommand extends BaseCommand {
     if (watch) {
       console.log(`Watching messages for project: ${project}`);
       console.log('Press Ctrl+C to stop...\n');
+      this.logger.info(`Watching messages for project: ${project}, count: ${countNum}`);
 
       const unwatch = messageLogger.watch(project, (entry) => {
         if (chat && entry.chatId !== chat) {
@@ -75,10 +81,12 @@ export class LogsCommand extends BaseCommand {
       });
 
       process.on('SIGINT', () => {
+        this.logger.info('Watch stopped by user');
         unwatch();
         process.exit(0);
       });
     } else {
+      this.logger.info(`Getting logs for project: ${project}, count: ${countNum}, output: ${output}, chat: ${chat}`);
       let logs: any[];
 
       if (chat) {
@@ -89,8 +97,11 @@ export class LogsCommand extends BaseCommand {
 
       if (logs.length === 0) {
         console.log(`No messages found for project: ${project}`);
+        this.logger.warn(`No messages found for project: ${project}`);
         return;
       }
+
+      this.logger.info(`Found ${logs.length} messages for project: ${project}`);
 
       if (output === 'json') {
         console.log(JSON.stringify(logs, null, 2));

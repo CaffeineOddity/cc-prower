@@ -31,12 +31,15 @@ export class StopCommand extends BaseCommand {
 
     if (sessions.length === 0) {
       console.log('No cc-power tmux sessions are running.');
+      this.logger.info('No cc-power tmux sessions are running.');
       return;
     }
 
     console.log('Found running cc-power tmux sessions:');
+    this.logger.info(`Found ${sessions.length} running cc-power tmux sessions`);
     for (const session of sessions) {
       console.log(`  - ${session}`);
+      this.logger.info(`  Session: ${session}`);
     }
 
     if (!force) {
@@ -55,13 +58,16 @@ export class StopCommand extends BaseCommand {
 
       if (answer !== 'yes' && answer !== 'y') {
         console.log('Stop cancelled.');
+        this.logger.info('Stop cancelled by user.');
         return;
       }
     }
 
     console.log('Stopping cc-power tmux sessions...');
+    this.logger.info(`Stopping ${sessions.length} cc-power tmux sessions...`);
     await killAllCCPowerTmuxSessions();
 
     console.log(`Stopped ${sessions.length} session(s).`);
+    this.logger.info(`Successfully stopped ${sessions.length} session(s).`);
   }
 }

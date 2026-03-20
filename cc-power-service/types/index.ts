@@ -1,20 +1,25 @@
 // 导出所有类型
 export * from './config.js';
 export * from './message.js';
+export * from './ccpower.config.js';
+export * from './provider.config.js';
 
 import {
   IncomingMessage,
   OutgoingMessage,
 } from './message.js';
 
-import {
+import type {
   ProjectConfig,
-  ProviderConfig
-} from './config.js';
+} from './ccpower.config.js';
+
+import type {
+  TemplateProviderConfig
+} from './provider.config.js';
 
 // Provider 基类接口
 export interface IProvider {
-  connect(config: ProviderConfig): Promise<void>;
+  connect(config: TemplateProviderConfig): Promise<void>;
   sendMessage(chatId: string, content: string): Promise<void>;
   onMessage(callback: (message: IncomingMessage) => void): void;
   isHealthy(): boolean;

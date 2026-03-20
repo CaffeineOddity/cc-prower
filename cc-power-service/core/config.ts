@@ -5,8 +5,8 @@ import type {
   GlobalConfig,
   ProjectConfig,
   IConfigManager,
-  ProviderType,
 } from '../types/config.js';
+import type { ProviderType } from '../types/provider.config.js';
 
 // 配置管理器
 // 负责加载和管理全局配置
@@ -45,7 +45,6 @@ export class ConfigManager implements IConfigManager {
 
     // 设置默认值
     const finalConfig: GlobalConfig = {
-      mcp: config.mcp || { transport: 'stdio', port: 8080 },
       logging: config.logging || { level: 'info' },
       providers: config.providers || { feishu: { enabled: true } }
     };

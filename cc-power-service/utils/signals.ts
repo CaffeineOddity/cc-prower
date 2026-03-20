@@ -1,6 +1,7 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
-
+import { TemplateProviderConfig } from '../types';
+import { get_project_id } from '../types/provider.config.js';
 /**
  * 信号类型
  */
@@ -28,6 +29,7 @@ export interface UnregisterSignal {
   projectId?: string;  // 可选
   projectName?: string;  // 新增：项目名称
   timestamp: number;
+  config: any;
 }
 
 /**
@@ -55,29 +57,32 @@ export function getCacheDir(): string {
  * 创建注册信号文件
  */
 export async function createRegisterSignal(
-  projectId: string | null,
   tmuxSession: string,
   projectDir: string,
-  projectConfig?: any
+  projectConfig?: TemplateProviderConfig
 ): Promise<void> {
   const signalsDir = getSignalsDir();
   await fs.mkdir(signalsDir, { recursive: true });
 
+  if (!projectConfig) {
+    throw new Error('Project config is required to create a register signal');
+  }
+  
   // 从配置中获取项目名称
-  const projectName = projectConfig?.project_name || path.basename(projectDir);
-
+  const projectName = projectConfig?.project_name;
+  const projectId = get_project_id(projectConfig);
   // 如果没有提供 projectId，使用 projectName 作为文件名的一部分
-  const signalFileId = projectId || projectName.replace(/[^a-zA-Z0-9_-]/g, '_');
-  const signalPath = path.join(signalsDir, `register-${signalFileId}.json`);
+//   const signalFileId = projectId ;
+  const signalPath = path.join(signalsDir, `register-${projectName}.json`);
 
   const signal: RegisterSignal = {
     type: 'register',
-    projectId: projectId || undefined,
+    projectId: projectId || 'unknown',
     projectName,
     tmuxPane: `${tmuxSession}:0`,
     timestamp: Date.now(),
     projectDirectory: projectDir,
-    provider: projectConfig?.provider?.name || projectConfig?.provider || 'unknown',
+    provider: projectConfig?.provider?.name || 'unknown',
     config: projectConfig || {},
   };
 
@@ -88,19 +93,28 @@ export async function createRegisterSignal(
 /**
  * 创建注销信号文件
  */
-export async function createUnregisterSignal(projectId: string | null, projectName?: string): Promise<void> {
+export async function createUnregisterSignal(projectConfig: TemplateProviderConfig): Promise<void> {
   const signalsDir = getSignalsDir();
   await fs.mkdir(signalsDir, { recursive: true });
 
+  if (!projectConfig) {
+    throw new Error('Project config is required to create a register signal');
+  }
+  
+  // 从配置中获取项目名称
+  const projectName = projectConfig?.project_name;
+  const projectId = get_project_id(projectConfig);
+
   // 如果没有提供 projectId，使用 projectName 作为文件名的一部分
-  const signalFileId = projectId || (projectName?.replace(/[^a-zA-Z0-9_-]/g, '_') || 'unknown');
-  const signalPath = path.join(signalsDir, `unregister-${signalFileId}.json`);
+//   const signalFileId = projectId;
+  const signalPath = path.join(signalsDir, `unregister-${projectName}.json`);
 
   const signal: UnregisterSignal = {
     type: 'unregister',
-    projectId: projectId || undefined,
+    projectId: projectId || 'unknown',
     projectName,
     timestamp: Date.now(),
+    config: projectConfig || {},
   };
 
   await fs.writeFile(signalPath, JSON.stringify(signal, null, 2));

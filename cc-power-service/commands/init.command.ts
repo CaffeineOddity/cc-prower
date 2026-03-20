@@ -48,6 +48,7 @@ export class InitCommand extends BaseCommand {
     }
 
     console.log(`Initializing project "${projectName}" in "${projectDir}" with provider: ${provider}`);
+    this.logger.info(`Initializing project "${projectName}" in "${projectDir}" with provider: ${provider}`);
     await fs.mkdir(projectDir, { recursive: true });
 
     const configPath = path.join(projectDir, '.cc-power.yaml');
@@ -55,7 +56,9 @@ export class InitCommand extends BaseCommand {
     try {
       await fs.access(configPath);
       console.log(`Config file already exists at: ${configPath}`);
+      this.logger.warn(`Config file already exists at: ${configPath}`);
       console.log('Initialization skipped to prevent overwriting.');
+      this.logger.warn('Initialization skipped to prevent overwriting.');
       return;
     } catch {
       // File doesn't exist, proceed with creation
@@ -69,14 +72,19 @@ export class InitCommand extends BaseCommand {
       configTemplate = await fs.readFile(templatePath, 'utf-8');
     } catch (error) {
       console.error(`Unknown provider or template not found: ${provider}`);
+      this.logger.error(`Unknown provider or template not found: ${provider}`);
       console.error(`Expected template at: ${templatePath}`);
+      this.logger.error(`Expected template at: ${templatePath}`);
       console.error(`__dirname: ${__dirname}`);
+      this.logger.error(`__dirname: ${__dirname}`);
       process.exit(1);
     }
 
     await fs.writeFile(configPath, configTemplate);
 
     console.log(`Project config created at: ${configPath}`);
+    this.logger.info(`Project config created at: ${configPath}`);
     console.log('Please edit the config file with your credentials.');
+    this.logger.info('Please edit the config file with your credentials.');
   }
 }

@@ -1,6 +1,6 @@
 import TelegramBot from 'node-telegram-bot-api';
 import { BaseProvider } from './base.js';
-import type { IncomingMessage, ProviderConfig, TelegramConfig } from '../types/index.js';
+import type { IncomingMessage, TemplateProviderConfig, TelegramConfig, TelegramTemplateConfig } from '../types/index.js';
 
 /**
  * Telegram Provider
@@ -8,7 +8,6 @@ import type { IncomingMessage, ProviderConfig, TelegramConfig } from '../types/i
  */
 export class TelegramProvider extends BaseProvider {
   private bot: TelegramBot | null = null;
-  private pollInterval: NodeJS.Timeout | null = null;
   private botToken: string = '';
   private chatId: string = '';
 
@@ -16,20 +15,11 @@ export class TelegramProvider extends BaseProvider {
     super('telegram');
   }
 
-  /**
-   * 生成 projectId: ${bot_token_prefix}_${chat_id}
-   * 使用 token 的前 8 位作为前缀，避免过长的 projectId
-   */
-  getProjectId(): string {
-    const tokenPrefix = this.botToken.substring(0, 8);
-    return `${tokenPrefix}_${this.chatId}`;
-  }
 
-  async connect(config: ProviderConfig): Promise<void> {
+  async connect(config: TelegramTemplateConfig): Promise<void> {
     this.config = config;
-    const telegramConfig = config as TelegramConfig;
 
-    const { bot_token: token, chat_id: chatId } = telegramConfig;
+    const { bot_token: token, chat_id: chatId } = config.provider;
 
     if (!token) {
       throw new Error('Telegram configuration missing bot_token');
@@ -74,9 +64,9 @@ export class TelegramProvider extends BaseProvider {
     }
 
     // 检查是否在允许的聊天列表中
-    const telegramConfig = this.config as TelegramConfig;
-    if (telegramConfig.allowed_chats) {
-      if (!telegramConfig.allowed_chats.includes(msg.chat.id)) {
+    const telegramConfig = this.config as TelegramTemplateConfig;
+    if (telegramConfig.provider.allowed_chats) {
+      if (!telegramConfig.provider.allowed_chats.includes(msg.chat.id)) {
         console.log(`Ignoring message from unauthorized chat: ${msg.chat.id}`);
         return;
       }

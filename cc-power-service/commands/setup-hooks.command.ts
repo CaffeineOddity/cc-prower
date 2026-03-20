@@ -36,10 +36,12 @@ export class SetupHooksCommand extends BaseCommand {
       const stats = await fs.stat(projectDir);
       if (!stats.isDirectory()) {
         console.error(`Error: ${projectDir} is not a directory`);
+        this.logger.error(`${projectDir} is not a directory`);
         process.exit(1);
       }
     } catch (error) {
       console.error(`Error: Directory does not exist: ${projectDir}`);
+      this.logger.error(`Directory does not exist: ${projectDir}`);
       process.exit(1);
     }
 
@@ -47,6 +49,7 @@ export class SetupHooksCommand extends BaseCommand {
     const settingsPath = path.join(projectDir, '.claude', 'settings.json');
 
     console.log(`Setting up hooks in: ${projectDir}`);
+    this.logger.info(`Setting up hooks in: ${projectDir}`);
 
     // 创建 hooks 目录
     await fs.mkdir(hooksDir, { recursive: true });
@@ -59,8 +62,10 @@ export class SetupHooksCommand extends BaseCommand {
       await fs.copyFile(hookTemplatePath, hookDestPath);
       await fs.chmod(hookDestPath, 0o755);
       console.log(`✓ Created hook script: ${hookDestPath}`);
+      this.logger.info(`Created hook script: ${hookDestPath}`);
     } catch (error) {
       console.error(`✗ Failed to copy hook script:`, error);
+      this.logger.error(`Failed to copy hook script:`, error);
       return;
     }
 
@@ -87,12 +92,15 @@ export class SetupHooksCommand extends BaseCommand {
     // 写入合并后的 settings.json
     await fs.writeFile(settingsPath, JSON.stringify(existingSettings, null, 2));
     console.log(`✓ Updated Claude Code settings: ${settingsPath}`);
+    this.logger.info(`Updated Claude Code settings: ${settingsPath}`);
 
     console.log('\nClaude Code hooks setup complete!');
+    this.logger.info('Claude Code hooks setup complete!');
     console.log('\nTo use:');
     console.log('1. Ensure the cc-power service is running, : ccpower start');
     console.log('2. Run your project: ccpower run <path>');
     console.log('3. Send a message from your chat platform');
     console.log('4. Claude will process and automatically send the response back');
+    this.logger.info('To use: 1) ccpower start 2) ccpower run <path> 3) Send message from chat platform 4) Claude auto responds');
   }
 }

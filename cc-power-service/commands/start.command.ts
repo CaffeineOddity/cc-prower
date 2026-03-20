@@ -2,19 +2,21 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import chokidar from 'chokidar';
 import { ConfigManager } from '../core/config.js';
-import { Logger } from '../core/logger.js';
+import { Logger } from '../utils/logger.js';
 import { Router } from '../core/router.js';
-import { MessageLogger } from '../core/message-logger.js';
-import { BaseCommand } from './base.command.js';
-import { getSignalsDir, getHooksDir } from '../utils/signals.js';
-
+import { MessageLogger } from '../utils/message-logger.js';
+import { BaseCommand,get_project_config_template } from './base.command.js';
+import { getSignalsDir, getHooksDir,UnregisterSignal,RegisterSignal } from '../utils/signals.js';
+import  {
+  type TemplateProviderConfig,
+  get_project_id
+} from '../types/provider.config.js';
 const CLI_NAME = 'ccpower';
 
 /**
  * Start 命令 - 启动 cc-power 服务
  */
 export class StartCommand extends BaseCommand {
-  private logger: Logger | null = null;
   private router: Router | null = null;
 
   getName(): string {
@@ -48,10 +50,13 @@ export class StartCommand extends BaseCommand {
     const configManager = new ConfigManager();
     const globalConfig = await configManager.load(actualConfigPath);
 
-    // 创建日志器
+    // 创建日志器（使用配置的日志级别）
     this.logger = new Logger(globalConfig.logging);
 
-    this.logger.info(`${CLI_NAME} starting...`);
+    // 在非 stdio 模式下输出到控制台
+    if (!forceStdio) {
+      this.logger.info(`${CLI_NAME} starting...`);
+    }
     this.logger.info(`Config: ${actualConfigPath}`);
 
     // 创建消息日志器
@@ -88,25 +93,25 @@ export class StartCommand extends BaseCommand {
     });
 
     hooksWatcher.on('add', async (filePath) => {
-      this.logger?.info(`[cc-power] hooksWatcher add: ${filePath}`);
+      this.logger.info(`[cc-power] hooksWatcher add: ${filePath}`);
       if (path.basename(filePath).startsWith('send-') && filePath.endsWith('.json')) {
         await this.processHookSignal(filePath);
       }
     });
 
     if (!forceStdio) {
-      console.log(`${CLI_NAME} is ready. Projects will be registered when you run 'ccpower run'.`);
-      console.log('Press Ctrl+C to stop the server.\n');
+      this.logger.info(`${CLI_NAME} is ready. Projects will be registered when you run 'ccpower run'.`);
+      this.logger.info('Press Ctrl+C to stop the server.\n');
     }
 
     // 优雅关闭
     const shutdown = async () => {
-      this.logger?.info('Shutting down...');
+      this.logger.info('Shutting down...');
 
       // 清理路由器资源
       await this.router?.cleanup();
 
-      this.logger?.info('Shutdown complete');
+      this.logger.info('Shutdown complete');
       process.exit(0);
     };
 
@@ -114,11 +119,11 @@ export class StartCommand extends BaseCommand {
     process.on('SIGINT', shutdown);
 
     process.on('uncaughtException', (err) => {
-      this.logger?.error('Uncaught Exception:', err);
+      this.logger.error('Uncaught Exception:', err);
     });
 
     process.on('unhandledRejection', (reason, promise) => {
-      this.logger?.error('Unhandled Rejection at:', promise, 'reason:', reason);
+      this.logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
     });
 
     this.logger.info(`${CLI_NAME} started successfully`);
@@ -128,7 +133,7 @@ export class StartCommand extends BaseCommand {
    * 处理信号文件
    */
   private async processSignalFile(filePath: string): Promise<void> {
-    if (!this.router || !this.logger) return;
+    if (!this.router) return;
 
     try {
       const fileName = path.basename(filePath);
@@ -145,7 +150,7 @@ export class StartCommand extends BaseCommand {
       }
 
       const signal = JSON.parse(fileContent);
-      this.logger.info(`Processing signal file: ${fileName}`, signal);
+      this.logger.info(`Processing signal file: ${fileName}`);
 
       if (fileName.startsWith('register-')) {
         await this.handleRegisterSignal(filePath, signal);
@@ -160,26 +165,20 @@ export class StartCommand extends BaseCommand {
   /**
    * 处理注册信号
    */
-  private async handleRegisterSignal(filePath: string, signal: any): Promise<void> {
-    if (!this.router || !this.logger) return;
+  private async handleRegisterSignal(filePath: string, signal: RegisterSignal): Promise<void> {
+    if (!this.router) return;
 
     const projectDir = signal.projectDirectory;
     if (!projectDir) {
       this.logger.error(`No projectDirectory in register signal`);
       return;
     }
+    
+    let projectConfig = await get_project_config_template(projectDir)
 
-    // 加载项目配置
-    const configFile = path.join(projectDir, '.cc-power.yaml');
-    let projectConfig: any;
-
-    try {
-      const configContent = await fs.readFile(configFile, 'utf-8');
-      const yaml = await import('yaml');
-      projectConfig = yaml.parse(configContent);
-    } catch (error) {
-      this.logger.error(`Failed to load project config:`, error);
-      return;
+    if (!projectConfig) {
+        this.logger.error(`No projectConfig in register signal`);
+        return;
     }
 
     const finalConfig = {
@@ -189,7 +188,7 @@ export class StartCommand extends BaseCommand {
 
     // 不再需要 projectId，由 router 自动生成
     await this.router.registerProject(undefined, finalConfig);
-    this.logger.info(`Successfully registered project from signal`);
+    this.logger.info(`Successfully registered project from signal: ${signal.projectName}`);
 
     await fs.unlink(filePath).catch(() => {});
   }
@@ -197,10 +196,11 @@ export class StartCommand extends BaseCommand {
   /**
    * 处理注销信号
    */
-  private async handleUnregisterSignal(filePath: string, signal: any): Promise<void> {
-    if (!this.router || !this.logger) return;
+  private async handleUnregisterSignal(filePath: string, signal: UnregisterSignal): Promise<void> {
+    if (!this.router) return;
 
-    const projectId = signal.projectId;
+    const config = signal as UnregisterSignal
+    const projectId = get_project_id(config.config);
     const projectName = signal.projectName;
 
     if (!projectId && !projectName) {
@@ -231,7 +231,7 @@ export class StartCommand extends BaseCommand {
    * 处理 Hook 信号文件
    */
   private async processHookSignal(filePath: string): Promise<void> {
-    if (!this.router || !this.logger) return;
+    if (!this.router) return;
 
     try {
       let fileContent: string;
@@ -245,12 +245,9 @@ export class StartCommand extends BaseCommand {
       }
 
       const signal = JSON.parse(fileContent);
-      this.logger.info(`Received hook signal`);
+      this.logger.info(`Received hook signal: ${filePath}`);
 
-      // 支持新旧两种信号格式
-      if (signal.type === 'send_message' && signal.chatId && signal.content) {
-        await this.handleOldHookSignal(signal);
-      } else if (signal.hook_event_name === 'Stop' || (signal.provider && signal.project_id)) {
+      if (signal.hook_event_name === 'Stop' || (signal.provider && signal.project_name)) {
         await this.handleNewHookSignal(signal);
       } else {
         this.logger.warn(`Unknown hook signal format`);
@@ -263,35 +260,19 @@ export class StartCommand extends BaseCommand {
     }
   }
 
-  /**
-   * 处理旧格式 Hook 信号
-   */
-  private async handleOldHookSignal(signal: any): Promise<void> {
-    if (!this.router || !this.logger) return;
-
-    const { provider, projectId, chatId, content } = signal;
-
-    const providerInstance = this.router.getProvider(projectId);
-    if (!providerInstance) {
-      this.logger.error(`Provider not found: ${projectId}`);
-      return;
-    }
-
-    await providerInstance.sendMessage(chatId, content);
-    this.logger.info(`Hook message sent to ${provider}:${chatId}`);
-  }
+ 
 
   /**
    * 处理新格式 Hook 信号
    */
   private async handleNewHookSignal(signal: any): Promise<void> {
-    if (!this.router || !this.logger) return;
+    if (!this.router) return;
 
-    const { project_id: projectId, transcript_path: transcriptPath, last_assistant_message: lastAssistantMessage, cwd } = signal;
-
+    const { transcript_path: transcriptPath, last_assistant_message: lastAssistantMessage, cwd } = signal;
+    const templateConfig = signal as TemplateProviderConfig;
     // 尝试使用 projectId 或从项目路径推断
     let providerInstance = null;
-    let actualProjectId = projectId;
+    let actualProjectId = get_project_id(templateConfig);
 
     // 如果没有 projectId，尝试从项目路径推断
     if (!actualProjectId && cwd) {

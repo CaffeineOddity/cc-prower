@@ -2,14 +2,13 @@ import type {
   IRouter,
   IncomingMessage,
   OutgoingMessage,
-  MessageRoute,
-  ProviderConfig,
-  ProjectConfig,
   IProvider,
 } from '../types/index.js';
+import type { ProjectConfig } from '../types/ccpower.config.js';
+import type { MessageRoute, TemplateProviderConfig } from '../types/index.js';
 import { ConfigManager } from './config.js';
-import { Logger } from './logger.js';
-import { MessageLogger} from './message-logger.js';
+import { Logger } from '../utils/logger.js';
+import { MessageLogger} from '../utils/message-logger.js';
 
 /**
  * 路由器
@@ -157,18 +156,16 @@ export class Router implements IRouter {
     const ProviderModule = await this.loadProvider(providerType);
     const providerInstance = new ProviderModule() as IProvider;
 
-    // 构建 ProviderConfig
-    const providerConfig: ProviderConfig = {
-      type: providerType,
-      projectId: '',  // 将在 connect 后由 Provider 生成
-      project_name,
-      ...providerSpecificConfig,
+    // 构建 TemplateProviderConfig
+    const templateConfig: TemplateProviderConfig = {
+      project_name: project_name || 'unnamed',
+      provider: providerSpecificConfig,
     };
 
     // 先调用 connect，让 Provider 生成自己的 projectId
     try {
       this.logger.info(`Attempting to connect provider...`);
-      await providerInstance.connect(providerConfig);
+      await providerInstance.connect(templateConfig);
       this.logger.info(`Provider connection successful`);
     } catch (connectionError) {
       const errorMessage = connectionError instanceof Error ? connectionError.message : String(connectionError);
@@ -204,6 +201,7 @@ export class Router implements IRouter {
 
     // 设置消息监听
     providerInstance.onMessage((message: IncomingMessage) => {
+        
       this.handleIncomingMessage(message);
     });
 

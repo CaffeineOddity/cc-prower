@@ -10,6 +10,36 @@ log_error() {
 }
 
 #######################################
+# Ensure yq is installed
+#######################################
+ensure_yq_installed() {
+  if command -v yq &> /dev/null; then
+    return
+  fi
+
+  log_info "Installing yq for YAML parsing..."
+
+  if command -v brew &> /dev/null; then
+    brew install yq 2>&1 | while IFS= read -r line; do
+      echo "[yq-install] $line" >&2
+    done
+  else
+    log_error "brew not found. Please install yq manually:"
+    log_error "  brew install yq"
+    log_error "Or download from: https://github.com/mikefarah/yq/releases"
+    exit 1
+  fi
+
+  # Verify installation
+  if ! command -v yq &> /dev/null; then
+    log_error "Failed to install yq. Please install it manually."
+    exit 1
+  fi
+
+  log_info "yq installed successfully"
+}
+
+#######################################
 # JSON parsing functions
 #######################################
 json_extract() {
@@ -90,29 +120,30 @@ PROJECT_CONFIG=$(load_project_config "$CWD") || {
   exit 1
 }
 
-# 提取 provider 和 project_id
-PROVIDER=$(yaml_extract "$PROJECT_CONFIG" "provider" "unknown")
-PROJECT_ID=$(yaml_extract "$PROJECT_CONFIG" "project_id")
+# 确保 yq 已安装
+ensure_yq_installed
 
-log_info "Project: $PROJECT_ID, Provider: $PROVIDER"
+# 提取 project_id 用于文件名
+PROJECT_ID=$(yaml_extract "$PROJECT_CONFIG" "project_id")
+[ -z "$PROJECT_ID" ] && PROJECT_ID="unknown"
+
+log_info "Project: $PROJECT_ID"
 
 # 将配置信息以key-value形式合并到input
-HOOK_INPUT_WITH_CONFIG=""
-if command -v jq &> /dev/null; then
+if command -v yq &> /dev/null && command -v jq &> /dev/null; then
   # 将YAML转换为JSON并合并
-  if command -v yq &> /dev/null; then
-    CONFIG_JSON=$(yq -o=json <<< "$PROJECT_CONFIG" 2>/dev/null)
-    HOOK_INPUT_WITH_CONFIG=$(jq --argjson config "$CONFIG_JSON" '. + $config' <<< "$HOOK_INPUT")
-  else
-    # 如果没有yq，手动提取provider和project_id
-    HOOK_INPUT_WITH_CONFIG=$(jq --arg p "$PROVIDER" --arg pid "$PROJECT_ID" '. + {"provider": $p, "project_id": $pid}' <<< "$HOOK_INPUT")
-  fi
+  CONFIG_JSON=$(yq -o=json <<< "$PROJECT_CONFIG" 2>/dev/null)
+  HOOK_INPUT_WITH_CONFIG=$(jq --argjson config "$CONFIG_JSON" '. + $config' <<< "$HOOK_INPUT")
+elif command -v jq &> /dev/null; then
+  # 有jq但没有yq（理论上不会走到这里，因为上面ensure_yq_installed）
+  PROVIDER=$(yaml_extract "$PROJECT_CONFIG" "provider" "unknown")
+  HOOK_INPUT_WITH_CONFIG=$(jq --arg p "$PROVIDER" --arg pid "$PROJECT_ID" '. + {"provider": $p, "project_id": $pid}' <<< "$HOOK_INPUT")
 else
   # Fallback
   HOOK_INPUT_WITH_CONFIG="$HOOK_INPUT"
 fi
 
-# 写入路径和文件名（按 stop-signal.sh 的方式）
+# 写入路径和文件名
 HOOKS_DIR="${HOME:-}/.cc-power/hooks"
 mkdir -p "$HOOKS_DIR"
 
@@ -122,5 +153,5 @@ OUTPUT_FILE="$HOOKS_DIR/send-$PROJECT_ID-$TIMESTAMP.json"
 # 提取响应内容并写入文件
 echo "$HOOK_INPUT_WITH_CONFIG" > "$OUTPUT_FILE"
 
-log_info "Response saved to: $OUTPUT_FILE" >&2
+log_info "Response saved to: $OUTPUT_FILE"
 exit 0

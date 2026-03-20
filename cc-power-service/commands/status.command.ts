@@ -29,6 +29,7 @@ export class StatusCommand extends BaseCommand {
     const { config: configPath } = options;
 
     console.log(`${CLI_NAME} status`);
+    this.logger.info(`Checking ${CLI_NAME} status...`);
 
     const configManager = new ConfigManager();
 
@@ -36,12 +37,16 @@ export class StatusCommand extends BaseCommand {
       const globalConfig = await configManager.load(configPath);
 
       console.log(`\nGlobal Config: ${configPath}`);
-      console.log(`Transport: ${globalConfig.mcp.transport}`);
       console.log(`Log Level: ${globalConfig.logging.level}`);
+
+      this.logger.info(`Global Config: ${configPath}`);
+      this.logger.info(`Log Level: ${globalConfig.logging.level}`);
 
       console.log(`\nEnabled Providers:`);
       for (const [provider, config] of Object.entries(globalConfig.providers)) {
-        console.log(`  - ${provider}: ${config.enabled ? 'enabled' : 'disabled'}`);
+        const providerConfig = config as { enabled?: boolean };
+        console.log(`  - ${provider}: ${providerConfig.enabled ? 'enabled' : 'disabled'}`);
+        this.logger.info(`Provider ${provider}: ${providerConfig.enabled ? 'enabled' : 'disabled'}`);
       }
     } catch (error) {
       this.handleError(error, 'status');

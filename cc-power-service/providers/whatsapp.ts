@@ -1,5 +1,5 @@
 import { BaseProvider } from './base.js';
-import type { IncomingMessage, ProviderConfig, WhatsAppConfig } from '../types/index.js';
+import type { IncomingMessage,  WhatsAppTemplateConfig } from '../types/index.js';
 
 /**
  * WhatsApp Provider
@@ -19,20 +19,12 @@ export class WhatsAppProvider extends BaseProvider {
     this.baseUrl = 'https://graph.facebook.com/v19.0';
   }
 
-  /**
-   * 生成 projectId: ${phone_number}_${chat_id}
-   */
-  getProjectId(): string {
-    return `${this.phoneNumber}_${this.chatId}`;
-  }
-
-  async connect(config: ProviderConfig): Promise<void> {
+  async connect(config: WhatsAppTemplateConfig): Promise<void> {
     this.config = config;
-    const whatsappConfig = config as WhatsAppConfig;
 
-    this.phoneNumber = whatsappConfig.phone_number;
-    this.apiKey = whatsappConfig.api_key;
-    this.chatId = whatsappConfig.chat_id || '';
+    this.phoneNumber = config.provider.phone_number;
+    this.apiKey = config.provider.api_key;
+    this.chatId = config.provider.chat_id || '';
 
     // 保存项目名称
     this.projectName = config.project_name;
@@ -130,9 +122,9 @@ export class WhatsAppProvider extends BaseProvider {
     } = message;
 
     // 检查是否在允许的号码列表中
-    const whatsappConfig = this.config as WhatsAppConfig;
-    if (whatsappConfig.allowed_numbers) {
-      if (!whatsappConfig.allowed_numbers.includes(from)) {
+    const whatsappConfig = (this.config as WhatsAppTemplateConfig | null);
+    if (whatsappConfig?.provider.allowed_numbers) {
+      if (!whatsappConfig.provider.allowed_numbers.includes(from)) {
         console.log(`Ignoring message from unauthorized number: ${from}`);
         return;
       }

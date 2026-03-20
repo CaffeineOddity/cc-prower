@@ -1,8 +1,8 @@
 import * as lark from '@larksuiteoapi/node-sdk';
 import { BaseProvider } from './base.js';
-import type { IncomingMessage, ProviderConfig, FeishuConfig } from '../types/index.js';
+import type { IncomingMessage, FeishuTemplateConfig, TemplateProviderConfig } from '../types/index.js';
 import { FeishuConnectionManager } from './feishu-connection-manager.js';
-import { Logger } from '../core/logger.js';
+import { Logger } from '../utils/logger.js';
 
 /**
  * 飞书 (Feishu/Lark) Provider
@@ -23,18 +23,12 @@ export class FeishuProvider extends BaseProvider {
     this.connectionManager = FeishuConnectionManager.getInstance(this.logger);
   }
 
-  /**
-   * 生成 projectId: ${app_id}_${chat_id}
-   */
-  getProjectId(): string {
-    return `${this.appId}_${this.chatId}`;
-  }
 
-  async connect(config: ProviderConfig): Promise<void> {
+
+  async connect(config: FeishuTemplateConfig): Promise<void> {
     this.config = config;
-    const feishuConfig = config as FeishuConfig;
 
-    const { app_id: appId, app_secret: appSecret, chat_id: chatId, priority = 0, keyword } = feishuConfig;
+    const { app_id: appId, app_secret: appSecret, chat_id: chatId, priority = 0, keyword } = config.provider;
 
     if (!appId || !appSecret) {
       throw new Error('Feishu configuration missing app_id or app_secret');
@@ -49,14 +43,14 @@ export class FeishuProvider extends BaseProvider {
     this.chatId = chatId;
 
     // 保存项目名称
-    this.projectName = config.project_name || feishuConfig.bot_name;
+    this.projectName = config.project_name || config.provider.bot_name;
 
     // 生成 projectId
     const projectId = this.getProjectId();
 
     // 使用连接管理器获取 WebSocket 连接和 API Client
     this.logger.info(`Attempting to get or connect WebSocket for app_id: ${appId}`);
-    const { apiClient, eventDispatcher } = await this.connectionManager.getOrConnect(appId, appSecret);
+    const { apiClient } = await this.connectionManager.getOrConnect(appId, appSecret);
     this.apiClient = apiClient;
     this.logger.info(`WebSocket connection obtained for app_id: ${appId}`);
 
@@ -111,7 +105,7 @@ export class FeishuProvider extends BaseProvider {
     }
   }
 
-  private async handleIncomingMessage(message: any, sender?: any, config?: any): Promise<void> {
+  private async handleIncomingMessage(message: any, sender?: any, config?: TemplateProviderConfig): Promise<void> {
     try {
 
       const content = JSON.parse(message.content);

@@ -29,6 +29,7 @@ export class UninstallCommand extends BaseCommand {
     const { yes } = options;
 
     console.log('Preparing to uninstall cc-power...');
+    this.logger.info('Preparing to uninstall cc-power...');
 
     if (!yes) {
       const readline = await import('readline');
@@ -46,6 +47,7 @@ export class UninstallCommand extends BaseCommand {
 
       if (answer !== 'yes' && answer !== 'y') {
         console.log('Uninstall cancelled.');
+        this.logger.info('Uninstall cancelled by user.');
         return;
       }
     }
@@ -53,6 +55,7 @@ export class UninstallCommand extends BaseCommand {
     try {
       // 关闭 tmux 会话
       console.log('Stopping any running cc-power tmux sessions...');
+      this.logger.info('Stopping any running cc-power tmux sessions...');
       await killAllCCPowerTmuxSessions();
 
       // 删除 .cc-power 目录
@@ -60,8 +63,10 @@ export class UninstallCommand extends BaseCommand {
       try {
         await fs.rm(ccPowerDir, { recursive: true, force: true });
         console.log(`Removed directory: ${ccPowerDir}`);
+        this.logger.info(`Removed directory: ${ccPowerDir}`);
       } catch (error) {
         console.warn(`Could not remove directory ${ccPowerDir}`);
+        this.logger.warn(`Could not remove directory ${ccPowerDir}`);
       }
 
       // 查找并删除信号文件
@@ -74,6 +79,7 @@ export class UninstallCommand extends BaseCommand {
         try {
           await fs.rm(signalDir, { recursive: true, force: true });
           console.log(`Removed signal directory: ${signalDir}`);
+          this.logger.info(`Removed signal directory: ${signalDir}`);
         } catch {
           // Ignore
         }
@@ -93,6 +99,7 @@ export class UninstallCommand extends BaseCommand {
             if (content.includes('cc-power') || content.includes('provider:') || content.includes('claude')) {
               await fs.unlink(configFile);
               console.log(`Removed project config: ${configFile}`);
+              this.logger.info(`Removed project config: ${configFile}`);
             }
           }
         } catch {
@@ -116,6 +123,7 @@ export class UninstallCommand extends BaseCommand {
           if (hasCCPowerLogs) {
             await fs.rm(logDir, { recursive: true, force: true });
             console.log(`Removed log directory: ${logDir}`);
+            this.logger.info(`Removed log directory: ${logDir}`);
           }
         } catch {
           // Ignore
@@ -123,8 +131,10 @@ export class UninstallCommand extends BaseCommand {
       }
 
       console.log('\nccpower has been uninstalled successfully.');
+      this.logger.info('ccpower has been uninstalled successfully.');
       console.log('To completely remove it from your system, you may also want to run:');
       console.log('  npm uninstall -g ccpower');
+      this.logger.info('To completely remove, run: npm uninstall -g ccpower');
     } catch (error) {
       this.handleError(error, 'uninstall');
     }

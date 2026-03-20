@@ -45,7 +45,6 @@ async function testAutoRegister() {
     const configManager = new ConfigManager();
     const globalConfig = await configManager.load(path.join(currentDir, 'config.yaml'));
     console.log('✓ Global config loaded');
-    console.log('  mcp:', globalConfig.mcp);
     console.log('  projects_dir:', globalConfig.projects_dir);
     console.log('  logging:', globalConfig.logging);
     console.log('  providers:', globalConfig.providers);

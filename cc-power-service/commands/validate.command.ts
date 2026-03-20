@@ -27,21 +27,26 @@ export class ValidateCommand extends BaseCommand {
     const { config: configPath } = options;
 
     console.log(`Validating config: ${configPath}`);
+    this.logger.info(`Validating config: ${configPath}`);
 
     const configManager = new ConfigManager();
 
     try {
       const globalConfig = await configManager.load(configPath);
       console.log('✓ Global config is valid');
+      this.logger.info('Global config is valid');
 
       console.log(`\nEnabled Providers:`);
       for (const [provider, config] of Object.entries(globalConfig.providers)) {
-        console.log(`  - ${provider}: ${config.enabled ? 'enabled' : 'disabled'}`);
+        const providerConfig = config as { enabled?: boolean };
+        console.log(`  - ${provider}: ${providerConfig.enabled ? 'enabled' : 'disabled'}`);
+        this.logger.info(`Provider ${provider}: ${providerConfig.enabled ? 'enabled' : 'disabled'}`);
       }
     } catch (error) {
       this.handleError(error, 'validate');
     }
 
     console.log('Config is valid!');
+    this.logger.info('Config is valid!');
   }
 }

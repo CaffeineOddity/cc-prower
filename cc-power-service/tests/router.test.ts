@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { Router } from '../core/router.js';
 import { ConfigManager } from '../core/config.js';
-import { Logger } from '../core/logger.js';
-import { MessageLogger } from '../core/message-logger.js';
-import type { ProjectConfig } from '../types/config.js';
+import { Logger } from '../utils/logger.js';
+import { MessageLogger } from '../utils/message-logger.js';
+import type { ProjectConfig } from '../types/ccpower.config.js';
 import type { IncomingMessage, OutgoingMessage } from '../types/message.js';
 
 // Mock dependencies

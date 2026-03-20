@@ -1,7 +1,7 @@
 import { ConfigManager } from './core/config.js';
-import { Logger } from './core/logger.js';
+import { Logger } from './utils/logger.js';
 import { Router } from './core/router.js';
-import { MessageLogger } from './core/message-logger.js';
+import { MessageLogger } from './utils/message-logger.js';
 
 export { ConfigManager, Logger, Router, MessageLogger };
 export * from './types/index.js';

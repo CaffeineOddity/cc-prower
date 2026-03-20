@@ -5,11 +5,11 @@
 import type {
   IProvider,
   IncomingMessage,
-  ProviderConfig,
+  TemplateProviderConfig,
 } from '../types/index.js';
-
+import { get_project_id } from '../types/provider.config.js';
 export abstract class BaseProvider implements IProvider {
-  protected config: ProviderConfig | null = null;
+  protected config: TemplateProviderConfig | null = null;
   protected connected: boolean = false;
   protected name: string;
   protected messageCallback: ((message: IncomingMessage) => void) | null = null;
@@ -22,18 +22,12 @@ export abstract class BaseProvider implements IProvider {
   /**
    * 连接到平台
    */
-  abstract connect(config: ProviderConfig): Promise<void>;
+  abstract connect(config: TemplateProviderConfig): Promise<void>;
 
   /**
    * 发送消息到平台
    */
   abstract sendMessage(chatId: string, content: string): Promise<void>;
-
-  /**
-   * 获取自动生成的 projectId
-   * 子类必须实现此方法，基于 app_id/bot_token/phone_number + chat_id 生成
-   */
-  abstract getProjectId(): string;
 
   /**
    * 获取项目名称
@@ -74,7 +68,7 @@ export abstract class BaseProvider implements IProvider {
   /**
    * 获取配置
    */
-  getConfig(): ProviderConfig | null {
+  getConfig(): TemplateProviderConfig | null {
     return this.config;
   }
 
@@ -86,4 +80,14 @@ export abstract class BaseProvider implements IProvider {
       this.messageCallback(message);
     }
   }
+
+    /**
+     * 生成 projectId: ${app_id}_${chat_id}
+     */
+    getProjectId(): string {
+        if (!this.config) {
+        throw new Error('Feishu provider not connected');
+        }
+        return get_project_id(this.config);
+    }
 }
