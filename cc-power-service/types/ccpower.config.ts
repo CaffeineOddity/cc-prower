@@ -8,6 +8,12 @@ import type { ProvidersConfig } from './provider.config.js';
 export interface GlobalConfig {
   logging: LoggingConfig;
   providers: ProvidersConfig;
+  WebSocket?: WebSocketConfig;
+}
+
+export interface WebSocketConfig {
+  port: number;
+  host: string;
 }
 
 export interface LoggingConfig {

@@ -1,13 +1,7 @@
-# cc-connect-carry 配置示例
 
-# MCP 服务器配置
-mcp:
-  # 传输方式: stdio 或 http
-  transport: "stdio"
-  # HTTP 模式下的端口（仅当 transport=http 时使用）
-  port: 8888
+WebSocket:
+  port: 8080
   host: "127.0.0.1"
-
 
 # 日志配置 包含的日志级别
 # - debug → 打印 debug、info、warn、error（所有日志）
@@ -25,3 +19,5 @@ providers:
     enabled: false
   whatsapp:
     enabled: false
+  custom:
+    enabled: true
