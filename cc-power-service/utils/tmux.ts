@@ -34,15 +34,6 @@ export function createTmuxSession(sessionName: string, projectPath: string, comm
   try {
     console.log(`createTmuxSession cmd ${cmd}`);
     execSync(cmd);
-
-    // 设置 pane-border-status 在左上角显示 session 名称
-    try {
-      execSync(`tmux set-option -t ${sessionName} pane-border-status top`);
-      execSync(`tmux set-option -t ${sessionName} pane-border-format "#{pane_title} | #{session_name}"`);
-    } catch (e) {
-      // 如果设置失败，不影响 session 创建，静默忽略
-      console.warn(`Warning: Could not set pane-border-status for ${sessionName}`);
-    }
   } catch (error) {
     console.error(`Error creating tmux session ${sessionName}: ${error}`);
     process.exit(1);
