@@ -32,6 +32,7 @@ export interface ProviderConfigBase {
 
 // 项目配置
 export interface ProjectConfig {
+  project_name?: string; // 可选：项目名称，用于显示和 tmux session
   provider: ProviderType | ProviderConfigBase; // 兼容新旧格式
   session?: SessionConfig;
   [key: string]: any; // Provider 特定配置（旧格式）
@@ -45,7 +46,8 @@ export interface SessionConfig {
 // Provider 配置
 export interface ProviderConfig {
   type: ProviderType;
-  projectId: string;
+  projectId: string;  // 内部使用，由 Provider 自动生成
+  project_name?: string;  // 可选：项目名称
   [key: string]: any;
 }
 
@@ -64,6 +66,7 @@ export interface FeishuConfig extends ProviderConfig {
 export interface TelegramConfig extends ProviderConfig {
   type: 'telegram';
   bot_token: string;
+  chat_id?: string;      // 监听的聊天ID（单个）
   allowed_chats?: number[];
 }
 
@@ -71,6 +74,7 @@ export interface WhatsAppConfig extends ProviderConfig {
   type: 'whatsapp';
   phone_number: string;
   api_key: string;
+  chat_id?: string;      // 监听的聊天ID（单个）
   allowed_numbers?: string[];
 }
 

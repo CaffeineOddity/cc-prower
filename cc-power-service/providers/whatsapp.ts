@@ -12,10 +12,18 @@ export class WhatsAppProvider extends BaseProvider {
   private accessToken: string | null = null;
   private pollInterval: NodeJS.Timeout | null = null;
   private lastMessageTimestamp: number = 0;
+  private chatId: string = '';
 
   constructor() {
     super('whatsapp');
     this.baseUrl = 'https://graph.facebook.com/v19.0';
+  }
+
+  /**
+   * 生成 projectId: ${phone_number}_${chat_id}
+   */
+  getProjectId(): string {
+    return `${this.phoneNumber}_${this.chatId}`;
   }
 
   async connect(config: ProviderConfig): Promise<void> {
@@ -24,6 +32,10 @@ export class WhatsAppProvider extends BaseProvider {
 
     this.phoneNumber = whatsappConfig.phone_number;
     this.apiKey = whatsappConfig.api_key;
+    this.chatId = whatsappConfig.chat_id || '';
+
+    // 保存项目名称
+    this.projectName = config.project_name;
 
     // 获取 access token
     await this.authenticate();
@@ -129,12 +141,15 @@ export class WhatsAppProvider extends BaseProvider {
     const incomingMessage: IncomingMessage = {
       type: 'incoming',
       provider: 'whatsapp',
-      projectId: this.config?.projectId || '',
+      projectId: this.getProjectId(),  // 使用自动生成的 projectId
       chatId: from,
       userId: from,
       content: text?.body || '',
       timestamp: Date.now(),
       metadata: {
+        project_name: this.projectName,  // 添加项目名称到元数据
+        phone_number: this.phoneNumber,
+        chat_id: this.chatId || from,
         message_id: id,
         message_type: type,
         to,

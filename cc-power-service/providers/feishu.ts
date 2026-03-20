@@ -23,6 +23,13 @@ export class FeishuProvider extends BaseProvider {
     this.connectionManager = FeishuConnectionManager.getInstance(this.logger);
   }
 
+  /**
+   * 生成 projectId: ${app_id}_${chat_id}
+   */
+  getProjectId(): string {
+    return `${this.appId}_${this.chatId}`;
+  }
+
   async connect(config: ProviderConfig): Promise<void> {
     this.config = config;
     const feishuConfig = config as FeishuConfig;
@@ -41,6 +48,12 @@ export class FeishuProvider extends BaseProvider {
     this.appId = appId;
     this.chatId = chatId;
 
+    // 保存项目名称
+    this.projectName = config.project_name || feishuConfig.bot_name;
+
+    // 生成 projectId
+    const projectId = this.getProjectId();
+
     // 使用连接管理器获取 WebSocket 连接和 API Client
     this.logger.info(`Attempting to get or connect WebSocket for app_id: ${appId}`);
     const { apiClient, eventDispatcher } = await this.connectionManager.getOrConnect(appId, appSecret);
@@ -50,7 +63,7 @@ export class FeishuProvider extends BaseProvider {
     // 注册 Provider 到路由表
     this.providerId = this.connectionManager.registerProvider(
       appId,
-      config.projectId,
+      projectId,
       chatId,
       priority,
       keyword,
@@ -130,16 +143,18 @@ export class FeishuProvider extends BaseProvider {
       const incomingMessage: IncomingMessage = {
         type: 'incoming',
         provider: 'feishu',
-        projectId: this.config?.projectId || config?.projectId || '',
+        projectId: this.getProjectId(),  // 使用自动生成的 projectId
         chatId: message.chat_id,
         userId: userId,
         userName: senderName,
         content: textContent,
         timestamp: message.create_time || Date.now(),
         metadata: {
+          project_name: this.projectName,  // 添加项目名称到元数据
+          app_id: this.appId,
+          chat_id: this.chatId,
           message_id: message.message_id,
           message_type: message.message_type || message.msg_type,
-          app_id: config?.app_id || '',
         },
       };
 

@@ -9,16 +9,38 @@ import type { IncomingMessage, ProviderConfig, TelegramConfig } from '../types/i
 export class TelegramProvider extends BaseProvider {
   private bot: TelegramBot | null = null;
   private pollInterval: NodeJS.Timeout | null = null;
+  private botToken: string = '';
+  private chatId: string = '';
 
   constructor() {
     super('telegram');
+  }
+
+  /**
+   * 生成 projectId: ${bot_token_prefix}_${chat_id}
+   * 使用 token 的前 8 位作为前缀，避免过长的 projectId
+   */
+  getProjectId(): string {
+    const tokenPrefix = this.botToken.substring(0, 8);
+    return `${tokenPrefix}_${this.chatId}`;
   }
 
   async connect(config: ProviderConfig): Promise<void> {
     this.config = config;
     const telegramConfig = config as TelegramConfig;
 
-    const { bot_token: token } = telegramConfig;
+    const { bot_token: token, chat_id: chatId } = telegramConfig;
+
+    if (!token) {
+      throw new Error('Telegram configuration missing bot_token');
+    }
+
+    // 保存 bot_token 和 chatId
+    this.botToken = token;
+    this.chatId = chatId || '';
+
+    // 保存项目名称
+    this.projectName = config.project_name;
 
     // 创建 bot 实例
     this.bot = new TelegramBot(token, { polling: false });
@@ -63,13 +85,16 @@ export class TelegramProvider extends BaseProvider {
     const incomingMessage: IncomingMessage = {
       type: 'incoming',
       provider: 'telegram',
-      projectId: this.config.projectId,
+      projectId: this.getProjectId(),  // 使用自动生成的 projectId
       chatId: msg.chat.id.toString(),
       userId: msg.from?.id?.toString() || 'unknown',
       userName: msg.from?.username || msg.from?.first_name || 'unknown',
       content: msg.text || '',
       timestamp: Date.now(),
       metadata: {
+        project_name: this.projectName,  // 添加项目名称到元数据
+        bot_token_prefix: this.botToken.substring(0, 8),
+        chat_id: this.chatId || msg.chat.id.toString(),
         message_id: msg.message_id,
         chat_type: msg.chat.type,
       },

@@ -13,6 +13,7 @@ export abstract class BaseProvider implements IProvider {
   protected connected: boolean = false;
   protected name: string;
   protected messageCallback: ((message: IncomingMessage) => void) | null = null;
+  protected projectName?: string;  // 新增：项目名称
 
   constructor(name: string) {
     this.name = name;
@@ -27,6 +28,19 @@ export abstract class BaseProvider implements IProvider {
    * 发送消息到平台
    */
   abstract sendMessage(chatId: string, content: string): Promise<void>;
+
+  /**
+   * 获取自动生成的 projectId
+   * 子类必须实现此方法，基于 app_id/bot_token/phone_number + chat_id 生成
+   */
+  abstract getProjectId(): string;
+
+  /**
+   * 获取项目名称
+   */
+  getProjectName(): string | undefined {
+    return this.projectName;
+  }
 
   /**
    * 注册消息回调

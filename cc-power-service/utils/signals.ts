@@ -11,7 +11,8 @@ export type SignalType = 'register' | 'unregister';
  */
 export interface RegisterSignal {
   type: 'register';
-  projectId: string;
+  projectId?: string;  // 可选：由 Provider 自动生成
+  projectName?: string;  // 新增：项目名称
   tmuxPane: string;
   timestamp: number;
   projectDirectory: string;
@@ -24,7 +25,8 @@ export interface RegisterSignal {
  */
 export interface UnregisterSignal {
   type: 'unregister';
-  projectId: string;
+  projectId?: string;  // 可选
+  projectName?: string;  // 新增：项目名称
   timestamp: number;
 }
 
@@ -53,7 +55,7 @@ export function getCacheDir(): string {
  * 创建注册信号文件
  */
 export async function createRegisterSignal(
-  projectId: string,
+  projectId: string | null,
   tmuxSession: string,
   projectDir: string,
   projectConfig?: any
@@ -61,37 +63,46 @@ export async function createRegisterSignal(
   const signalsDir = getSignalsDir();
   await fs.mkdir(signalsDir, { recursive: true });
 
-  const signalPath = path.join(signalsDir, `register-${projectId}.json`);
+  // 从配置中获取项目名称
+  const projectName = projectConfig?.project_name || path.basename(projectDir);
+
+  // 如果没有提供 projectId，使用 projectName 作为文件名的一部分
+  const signalFileId = projectId || projectName.replace(/[^a-zA-Z0-9_-]/g, '_');
+  const signalPath = path.join(signalsDir, `register-${signalFileId}.json`);
 
   const signal: RegisterSignal = {
     type: 'register',
-    projectId,
+    projectId: projectId || undefined,
+    projectName,
     tmuxPane: `${tmuxSession}:0`,
     timestamp: Date.now(),
     projectDirectory: projectDir,
-    provider: projectConfig?.provider || 'unknown',
+    provider: projectConfig?.provider?.name || projectConfig?.provider || 'unknown',
     config: projectConfig || {},
   };
 
   await fs.writeFile(signalPath, JSON.stringify(signal, null, 2));
-  console.log(`Signal sent: Project ${projectId} registered with session ${tmuxSession}`);
+  console.log(`Signal sent: Project ${projectName} registered with session ${tmuxSession}`);
 }
 
 /**
  * 创建注销信号文件
  */
-export async function createUnregisterSignal(projectId: string): Promise<void> {
+export async function createUnregisterSignal(projectId: string | null, projectName?: string): Promise<void> {
   const signalsDir = getSignalsDir();
   await fs.mkdir(signalsDir, { recursive: true });
 
-  const signalPath = path.join(signalsDir, `unregister-${projectId}.json`);
+  // 如果没有提供 projectId，使用 projectName 作为文件名的一部分
+  const signalFileId = projectId || (projectName?.replace(/[^a-zA-Z0-9_-]/g, '_') || 'unknown');
+  const signalPath = path.join(signalsDir, `unregister-${signalFileId}.json`);
 
   const signal: UnregisterSignal = {
     type: 'unregister',
-    projectId,
+    projectId: projectId || undefined,
+    projectName,
     timestamp: Date.now(),
   };
 
   await fs.writeFile(signalPath, JSON.stringify(signal, null, 2));
-  console.log(`Signal sent: Project ${projectId} unregistered`);
+  console.log(`Signal sent: Project ${projectName || projectId} unregistered`);
 }

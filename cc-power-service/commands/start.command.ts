@@ -182,14 +182,14 @@ export class StartCommand extends BaseCommand {
       return;
     }
 
-    const projectId = signal.projectId || path.basename(projectDir);
     const finalConfig = {
       ...projectConfig,
       tmuxPane: signal.tmuxPane,
     };
 
-    await this.router.registerProject(projectId, finalConfig);
-    this.logger.info(`Successfully registered project: ${projectId}`);
+    // 不再需要 projectId，由 router 自动生成
+    await this.router.registerProject(undefined, finalConfig);
+    this.logger.info(`Successfully registered project from signal`);
 
     await fs.unlink(filePath).catch(() => {});
   }
@@ -201,13 +201,28 @@ export class StartCommand extends BaseCommand {
     if (!this.router || !this.logger) return;
 
     const projectId = signal.projectId;
-    if (!projectId) {
-      this.logger.error(`No projectId in unregister signal`);
+    const projectName = signal.projectName;
+
+    if (!projectId && !projectName) {
+      this.logger.error(`No projectId or projectName in unregister signal`);
       return;
     }
 
-    await this.router.unregisterProject(projectId);
-    this.logger.info(`Successfully unregistered project: ${projectId}`);
+    if (projectId) {
+      await this.router.unregisterProject(projectId);
+      this.logger.info(`Successfully unregistered project: ${projectId}`);
+    } else if (projectName) {
+      // 查找所有已注册的项目，匹配项目名称
+      const registeredProjects = this.router.getRegisteredProjects();
+      for (const pid of registeredProjects) {
+        const provider = this.router.getProvider(pid);
+        if (provider && provider.getProjectName() === projectName) {
+          await this.router.unregisterProject(pid);
+          this.logger.info(`Successfully unregistered project: ${pid} [${projectName}]`);
+          break;
+        }
+      }
+    }
 
     await fs.unlink(filePath).catch(() => {});
   }
@@ -272,21 +287,68 @@ export class StartCommand extends BaseCommand {
   private async handleNewHookSignal(signal: any): Promise<void> {
     if (!this.router || !this.logger) return;
 
-    const { project_id: projectId, transcript_path: transcriptPath, last_assistant_message: lastAssistantMessage } = signal;
+    const { project_id: projectId, transcript_path: transcriptPath, last_assistant_message: lastAssistantMessage, cwd } = signal;
 
-    const providerInstance = this.router.getProvider(projectId);
+    // 尝试使用 projectId 或从项目路径推断
+    let providerInstance = null;
+    let actualProjectId = projectId;
+
+    // 如果没有 projectId，尝试从项目路径推断
+    if (!actualProjectId && cwd) {
+      const { readProjectHistory } = await import('../utils/history.js');
+      const projectHistory = await readProjectHistory();
+
+      // 查找匹配的项目路径
+      for (const [key, entry] of Object.entries(projectHistory)) {
+        if (entry.projectPath === cwd || entry.projectPath === cwd.replace(/\/$/, '')) {
+          actualProjectId = entry.projectId || key;
+          break;
+        }
+      }
+    }
+
+    if (actualProjectId) {
+      providerInstance = this.router.getProvider(actualProjectId);
+    }
+
     if (!providerInstance) {
-      this.logger.error(`Provider not found: ${projectId}`);
+      this.logger.error(`Provider not found: ${actualProjectId || 'unknown'}`);
       return;
     }
 
-    // 从项目历史获取 chat_id
-    const { getProjectHistory } = await import('../utils/history.js');
-    const history = await getProjectHistory(projectId);
+    // 从项目历史或配置获取 chat_id
+    let chatId: string | undefined;
+    if (actualProjectId) {
+      const { getProjectHistory } = await import('../utils/history.js');
+      const history = await getProjectHistory(actualProjectId);
+      chatId = history?.config?.provider?.chat_id || history?.config?.chat_id;
+    }
 
-    const chatId = history?.config?.chat_id || history?.config?.provider?.chat_id;
+    if (!chatId && cwd) {
+      // 尝试从配置文件直接读取
+      try {
+        const configPaths = [
+          path.join(cwd, '.cc-power.yaml'),
+          path.join(cwd, 'config.yaml'),
+        ];
+        for (const candidate of configPaths) {
+          try {
+            const content = await fs.readFile(candidate, 'utf-8');
+            const yaml = await import('yaml');
+            const config = yaml.parse(content);
+            chatId = config?.provider?.chat_id || config?.chat_id;
+            if (chatId) break;
+          } catch (error) {
+            continue;
+          }
+        }
+      } catch (error) {
+        this.logger.debug(`Failed to read config for chat_id`);
+      }
+    }
+
     if (!chatId) {
-      this.logger.error(`No chat_id found for project: ${projectId}`);
+      this.logger.error(`No chat_id found for project: ${actualProjectId}`);
       return;
     }
 
@@ -314,6 +376,6 @@ export class StartCommand extends BaseCommand {
     }
 
     await providerInstance.sendMessage(chatId, content);
-    this.logger.info(`Hook message sent to ${projectId}:${chatId}`);
+    this.logger.info(`Hook message sent to ${actualProjectId}:${chatId}`);
   }
 }

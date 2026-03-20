@@ -19,6 +19,8 @@ export interface IProvider {
   onMessage(callback: (message: IncomingMessage) => void): void;
   isHealthy(): boolean;
   disconnect(): Promise<void>;
+  getProjectId(): string;  // 新增：获取自动生成的 projectId
+  getProjectName(): string | undefined;  // 新增：获取项目名称
 }
 
 // 路由器接口

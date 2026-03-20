@@ -1,5 +1,5 @@
 # Telegram Provider Configuration
-project_id: my-project-name  # Required: Unique project identifier
+project_name: My Telegram Bot  # Optional: Project name for display and tmux session
 
 provider:
   name: telegram

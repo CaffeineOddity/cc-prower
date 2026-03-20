@@ -1,6 +1,6 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
-import { spawn, execSync } from 'child_process';
+import { spawn } from 'child_process';
 import { BaseCommand } from './base.command.js';
 import { checkTmuxInstalled, tmuxSessionExists, createTmuxSession } from '../utils/tmux.js';
 import { createRegisterSignal, createUnregisterSignal } from '../utils/signals.js';
@@ -23,45 +23,27 @@ export class RunCommand extends BaseCommand {
       .command(this.getName())
       .description(this.getDescription())
       .argument('<path>', 'Path to project directory')
-      .option('-s, --session <name>', 'Custom tmux session name')
       .allowUnknownOption(true)
       .action(async (projectPath, options, command) => {
-        const claudeArgs = this.parseClaudeArgs(projectPath, options);
-        const finalOptions = { ...options, session: this.parseSessionName(options, claudeArgs) };
-        await this.execute(projectPath, finalOptions, claudeArgs);
+        const claudeArgs = this.parseClaudeArgs(projectPath);
+        await this.execute(projectPath, claudeArgs);
       });
   }
 
   /**
    * 解析 Claude 参数
    */
-  private parseClaudeArgs(projectPath: string, options: any): string[] {
+  private parseClaudeArgs(projectPath: string): string[] {
     const rawArgs = process.argv.slice(2);
     const runIndex = rawArgs.findIndex(arg => arg === 'run');
     let claudeArgs: string[] = [];
 
     if (runIndex !== -1) {
       const afterRun = rawArgs.slice(runIndex + 1);
-      let skipNext = false;
 
-      claudeArgs = afterRun.filter((arg, i) => {
-        if (skipNext) {
-          skipNext = false;
-          return false;
-        }
+      claudeArgs = afterRun.filter((arg) => {
+        // 过滤掉项目路径
         if (arg === projectPath) return false;
-
-        if (arg === '-s' || arg === '--session') {
-          if (i + 1 < afterRun.length) {
-            skipNext = true;
-          }
-          return false;
-        }
-
-        if (arg.startsWith('--session=')) {
-          return false;
-        }
-
         return true;
       }).map(arg => {
         if (arg === '-skip-ask') {
@@ -74,40 +56,7 @@ export class RunCommand extends BaseCommand {
     return claudeArgs;
   }
 
-  /**
-   * 解析 session 名称
-   */
-  private parseSessionName(options: any, claudeArgs: string[]): string | undefined {
-    const rawArgs = process.argv.slice(2);
-    const runIndex = rawArgs.findIndex(arg => arg === 'run');
-
-    if (runIndex === -1) return options.session;
-
-    const afterRun = rawArgs.slice(runIndex + 1);
-    let actualSessionName = options.session;
-
-    // Fix commander parsing issue with -skip-ask
-    if (options.session === 'kip-ask' && afterRun.includes('-skip-ask')) {
-      actualSessionName = undefined;
-    }
-
-    // Parse session from raw args
-    for (let i = 0; i < afterRun.length; i++) {
-      const arg = afterRun[i];
-      if (arg === '-s' || arg === '--session') {
-        if (i + 1 < afterRun.length) {
-          actualSessionName = afterRun[i + 1];
-        }
-      } else if (arg.startsWith('--session=')) {
-        actualSessionName = arg.split('=')[1];
-      }
-    }
-
-    return actualSessionName;
-  }
-
-  async execute(projectPath: string, options: any, claudeArgs: string[] = []): Promise<void> {
-    const { session } = options;
+  async execute(projectPath: string, claudeArgs: string[] = []): Promise<void> {
     const absProjectPath = path.resolve(projectPath);
     const projectName = path.basename(absProjectPath);
 
@@ -135,32 +84,19 @@ export class RunCommand extends BaseCommand {
       process.exit(1);
     }
 
-    // 验证 project_id
-    if (!projectConfig.project_id) {
-      console.error(`Error: project_id is required in .cc-power.yaml.`);
-      console.error('Please add it to your configuration:');
-      console.error('  project_id: my-project-name');
-      process.exit(1);
-    }
-
-    const projectId = projectConfig.project_id;
-    const app_id = projectConfig.provider?.app_id || projectConfig.app_id || '';
-    const chat_id = projectConfig.provider?.chat_id || projectConfig.chat_id || '';
-
-    // 生成唯一的 session 名称：使用项目名，但保留足够的唯一性
-    // tmux session 名称的限制：
-    // 1. 不能包含某些特殊字符
-    // 2. 名称长度应该合理
-    // 3. 同一个项目在同一时刻只能有一个 session
+    // 获取项目名称（用于 tmux session）
+    const project_name = projectConfig.project_name || projectName;
 
     // 规范化项目名称：移除或替换 tmux 不支持的字符
-    const safeProjectName = projectId.replace(/[^a-zA-Z0-9_-]/g, '_');
-    const sessionName = session || safeProjectName;
+    const safeProjectName = project_name.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+    // 生成固定的 session 名称格式
+    const sessionName = `cc-p-${safeProjectName}`;
 
     // 检查 tmux
     checkTmuxInstalled();
 
-    console.log(`Running project ${projectName} (ID: ${projectId}) in tmux session: ${sessionName}`);
+    console.log(`Running project ${projectName} [${project_name}] in tmux session: ${sessionName}`);
 
     // 检查 session 是否存在
     const sessionExists = tmuxSessionExists(sessionName);
@@ -179,11 +115,11 @@ export class RunCommand extends BaseCommand {
       // 启动新 session
       createTmuxSession(sessionName, absProjectPath, claudeCmd);
 
-      // 生成注册信号
-      await createRegisterSignal(projectId, sessionName, absProjectPath, projectConfig);
+      // 生成注册信号（使用 project_name）
+      await createRegisterSignal(null, sessionName, absProjectPath, projectConfig);
 
       // 记录项目历史
-      await recordProjectHistory(projectId, absProjectPath, projectConfig, sessionName);
+      await recordProjectHistory(null, absProjectPath, projectConfig, sessionName);
     }
 
     // Attach 到 session
@@ -198,7 +134,7 @@ export class RunCommand extends BaseCommand {
       }
 
       // 退出时生成注销信号
-      await createUnregisterSignal(projectId);
+      await createUnregisterSignal(null);
     });
   }
 }

@@ -6,7 +6,8 @@ import { getCacheDir } from './signals.js';
  * 项目历史记录
  */
 export interface ProjectHistory {
-  projectId: string;
+  projectId?: string;  // 可选：由 Provider 自动生成
+  projectName?: string;  // 新增：项目名称
   projectPath: string;
   config: any;
   sessionName: string;
@@ -78,15 +79,19 @@ export async function writeProjectHistory(history: Record<string, ProjectHistory
  * 记录项目历史
  */
 export async function recordProjectHistory(
-  projectId: string,
+  projectId: string | null,
   projectPath: string,
   config: any,
   sessionName: string
 ): Promise<void> {
   const history = await readProjectHistory();
 
-  history[projectId] = {
-    projectId,
+  // 使用 projectId 或 projectName 作为 key
+  const key = projectId || (config.project_name?.replace(/[^a-zA-Z0-9_-]/g, '_') || path.basename(projectPath));
+
+  history[key] = {
+    projectId: projectId || undefined,
+    projectName: config.project_name || path.basename(projectPath),
     projectPath,
     config,
     sessionName,
@@ -95,7 +100,7 @@ export async function recordProjectHistory(
   };
 
   await writeProjectHistory(history);
-  console.log(`Project history recorded for ${projectId}`);
+  console.log(`Project history recorded for ${key}`);
 }
 
 /**
@@ -104,4 +109,17 @@ export async function recordProjectHistory(
 export async function getProjectHistory(projectId: string): Promise<ProjectHistory | null> {
   const history = await readProjectHistory();
   return history[projectId] || null;
+}
+
+/**
+ * 根据 projectName 获取项目历史
+ */
+export async function getProjectHistoryByName(projectName: string): Promise<ProjectHistory | null> {
+  const history = await readProjectHistory();
+  for (const [key, entry] of Object.entries(history)) {
+    if (entry.projectName === projectName || key === projectName) {
+      return entry;
+    }
+  }
+  return null;
 }

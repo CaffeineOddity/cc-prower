@@ -19,6 +19,7 @@ export class Router implements IRouter {
   private providers = new Map<string, IProvider>(); // projectId → Provider
   private projectRoutes = new Map<string, MessageRoute>(); // chatId → MessageRoute
   private projectTmuxSessions = new Map<string, string>(); // projectId → tmuxPane
+  private projectTmuxSessionsByProjectName = new Map<string, string>(); // projectName (normalized) → tmuxPane
   private configManager: ConfigManager;
   private logger: Logger;
   private messageLogger: MessageLogger;
@@ -130,8 +131,12 @@ export class Router implements IRouter {
   /**
    * 注册项目
    */
-  async registerProject(projectId: string, config: ProjectConfig): Promise<void> {
-    const { provider } = config;
+  async registerProject(projectId?: string, config?: ProjectConfig): Promise<void> {
+    if (!config) {
+      throw new Error('Project config is required for registration');
+    }
+
+    const { provider, project_name } = config;
     let providerType: string;
     let providerSpecificConfig: any = {};
 
@@ -140,7 +145,7 @@ export class Router implements IRouter {
       providerType = provider.name;
       providerSpecificConfig = provider;
     } else {
-      throw new Error(`Invalid provider configuration for project: ${projectId}`);
+      throw new Error(`Invalid provider configuration`);
     }
 
     // 验证 Provider 是否启用
@@ -148,48 +153,61 @@ export class Router implements IRouter {
       throw new Error(`Provider ${providerType} is not enabled in global config`);
     }
 
-    this.logger.info(`Registering project: ${projectId} (${providerType})`);
-
     // 动态导入 Provider
     const ProviderModule = await this.loadProvider(providerType);
     const providerInstance = new ProviderModule() as IProvider;
 
-    // 缓存项目配置
-    this.configManager.cacheProjectConfig(projectId, config);
-
-    // Store tmux session info if provided
-    if (config.tmuxPane) {
-      this.projectTmuxSessions.set(projectId, config.tmuxPane);
-      this.logger.debug(`Stored tmux session for project ${projectId}: ${config.tmuxPane}`);
-    }
-
     // 构建 ProviderConfig
-    // 新格式：provider 对象包含所有配置；旧格式：从 config[providerType] 提取
     const providerConfig: ProviderConfig = {
       type: providerType,
-      projectId,
+      projectId: '',  // 将在 connect 后由 Provider 生成
+      project_name,
       ...providerSpecificConfig,
     };
 
-    // 存储 Provider first to indicate the project is registered
-    this.providers.set(projectId, providerInstance);
+    // 先调用 connect，让 Provider 生成自己的 projectId
+    try {
+      this.logger.info(`Attempting to connect provider...`);
+      await providerInstance.connect(providerConfig);
+      this.logger.info(`Provider connection successful`);
+    } catch (connectionError) {
+      const errorMessage = connectionError instanceof Error ? connectionError.message : String(connectionError);
+      this.logger.error(`Failed to connect to provider: ${errorMessage}`);
+      this.logger.error(`Stack: ${connectionError instanceof Error ? connectionError.stack : 'No stack'}`);
+      throw connectionError; // 连接失败，不继续注册
+    }
+
+    // 获取 Provider 生成的 projectId
+    const actualProjectId = providerInstance.getProjectId();
+    const actualProjectName = providerInstance.getProjectName();
+
+    this.logger.info(`Registering project: ${actualProjectId} (${providerType})${actualProjectName ? ` [${actualProjectName}]` : ''}`);
+
+    // 缓存项目配置（使用实际的 projectId）
+    this.configManager.cacheProjectConfig(actualProjectId, config);
+
+    // Store tmux session info if provided
+    if (config.tmuxPane) {
+      this.projectTmuxSessions.set(actualProjectId, config.tmuxPane);
+      this.logger.debug(`Stored tmux session for project ${actualProjectId}: ${config.tmuxPane}`);
+
+      // 同时按项目名称存储
+      if (actualProjectName) {
+        const normalizedName = actualProjectName.replace(/[^a-zA-Z0-9_-]/g, '_');
+        this.projectTmuxSessionsByProjectName.set(normalizedName, config.tmuxPane);
+        this.logger.debug(`Stored tmux session by project name: ${normalizedName}`);
+      }
+    }
+
+    // 存储 Provider
+    this.providers.set(actualProjectId, providerInstance);
 
     // 设置消息监听
     providerInstance.onMessage((message: IncomingMessage) => {
       this.handleIncomingMessage(message);
     });
 
-    // Try to connect to the provider but don't let connection errors prevent registration
-    try {
-      this.logger.info(`Attempting to connect provider for project ${projectId}...`);
-      await providerInstance.connect(providerConfig);
-      this.logger.info(`Provider connection successful for project ${projectId}`);
-      this.logger.info(`Project ${projectId} registered successfully`);
-    } catch (connectionError) {
-      const errorMessage = connectionError instanceof Error ? connectionError.message : String(connectionError);
-      this.logger.error(`Failed to connect to provider for project ${projectId}: ${errorMessage}`);
-      this.logger.error(`Stack: ${connectionError instanceof Error ? connectionError.stack : 'No stack'}`);
-    }
+    this.logger.info(`Project ${actualProjectId} registered successfully`);
   }
 
   /**
@@ -208,6 +226,13 @@ export class Router implements IRouter {
 
     // Remove tmux session info
     this.projectTmuxSessions.delete(projectId);
+
+    // 清理 projectTmuxSessionsByProjectName
+    const projectName = provider.getProjectName();
+    if (projectName) {
+      const normalizedName = projectName.replace(/[^a-zA-Z0-9_-]/g, '_');
+      this.projectTmuxSessionsByProjectName.delete(normalizedName);
+    }
 
     // 清理相关路由
     for (const [chatId, route] of this.projectRoutes) {
@@ -329,13 +354,22 @@ export class Router implements IRouter {
   /**
    * 基于 Tmux 的输入注入，反向驱动 Claude Code
    */
-  /**
-   * 基于 Tmux 的输入注入，反向驱动 Claude Code
-   */
   private async injectMessageViaTmux(message: IncomingMessage): Promise<void> {
-    const tmuxPane = this.projectTmuxSessions.get(message.projectId);
+    // 从消息元数据获取 project_name
+    const projectName = message.metadata?.project_name;
+
+    if (!projectName) {
+      this.logger.warn(`No project_name found in message metadata for ${message.projectId}`);
+      return;
+    }
+
+    // 规范化项目名称
+    const normalizedName = projectName.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+    // 使用 project_name 查找 tmux session
+    const tmuxPane = this.projectTmuxSessionsByProjectName.get(normalizedName);
     if (!tmuxPane) {
-      this.logger.warn(`No tmux session found for project ${message.projectId}`);
+      this.logger.warn(`No tmux session found for project: ${normalizedName}`);
       return;
     }
 
@@ -353,7 +387,7 @@ export class Router implements IRouter {
       if (checkResult.stdout.toString().includes("no server running") ||
           checkResult.stderr.toString().includes("no server running") ||
           checkResult.stdout.toString().includes("doesn't exist")) {
-        this.logger.warn(`Tmux session ${sessionName} for project ${message.projectId} is dead, unregistering project`);
+        this.logger.warn(`Tmux session ${sessionName} for project ${normalizedName} is dead, unregistering project`);
         await this.unregisterProject(message.projectId);
         return;
       }
@@ -370,7 +404,7 @@ export class Router implements IRouter {
 
       // 获取所有面板的信息并找到匹配的
       // 格式: session:window_index pane_index:pane_pid:pane_current_command
-      // tmuxPane 格式如 cc-p-e35341e7:0 (session:window，pane 默认为 0)
+      // tmuxPane 格式如 cc-p-space-ship:0 (session:window，pane 默认为 0)
       const paneInfoResult = await execAsync(`tmux list-panes -a -F '#{session_name}:#{window_index} #{pane_index}:#{pane_pid}:#{pane_current_command}' 2>/dev/null || true`);
       const paneInfo = paneInfoResult.stdout.toString().trim();
 
@@ -427,7 +461,7 @@ export class Router implements IRouter {
     // 构建注入的 prompt。告诉 Claude Code 处理新消息并调用 send_message 回传结果
     const prompt = ` ${content}\n 处理完成后，务必调用'send_message'工具将结果发回给 chat_id: ${message.chatId}.`;
 
-    this.logger.info(`Injecting message to tmux pane ${tmuxPane} for project ${message.projectId}`);
+    this.logger.info(`Injecting message to tmux pane ${tmuxPane} for project ${normalizedName}`);
 
     const { exec } = await import('child_process');
     const { promisify } = await import('util');
@@ -442,7 +476,6 @@ export class Router implements IRouter {
       // tmuxPane 格式: "session:window.pane" (e.g., "cc-p-space-ship:0")
       const sendKeysCmd = `tmux send-keys -t ${tmuxPane} '${escapedPrompt}' Enter`;
 
-      this.logger.info(`Injecting message to tmux pane ${tmuxPane} for project ${message.projectId}`);
       this.logger.debug(`Send-keys command: ${sendKeysCmd}`);
 
       await execAsync(sendKeysCmd);

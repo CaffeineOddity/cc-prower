@@ -1,5 +1,6 @@
 # Feishu Provider Configuration
-project_id: my-project-name  # Required: Unique project identifier
+project_name: My Feishu Bot  # Optional: Project name for display and tmux session
+
 provider:
   name: feishu
   app_id: "cli_app_id_here"
