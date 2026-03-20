@@ -17,8 +17,7 @@ export interface RegisterSignal {
   tmuxPane: string;
   timestamp: number;
   projectDirectory: string;
-  provider: string;
-  config: any;
+  config: TemplateProviderConfig;
 }
 
 /**
@@ -29,7 +28,7 @@ export interface UnregisterSignal {
   projectId?: string;  // 可选
   projectName?: string;  // 新增：项目名称
   timestamp: number;
-  config: any;
+  config: TemplateProviderConfig;
 }
 
 /**
@@ -79,10 +78,9 @@ export async function createRegisterSignal(
     type: 'register',
     projectId: projectId || 'unknown',
     projectName,
-    tmuxPane: `${tmuxSession}:0`,
+    tmuxPane: `${tmuxSession}:0`,  // Default to window 0 (first window created by tmux)
     timestamp: Date.now(),
     projectDirectory: projectDir,
-    provider: projectConfig?.provider?.name || 'unknown',
     config: projectConfig || {},
   };
 
