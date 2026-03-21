@@ -1,5 +1,5 @@
 import { BaseProvider } from './base.js';
-import type { IncomingMessage, CustomTemplateConfig } from '../types/index.js';
+import type { IncomingMessage, CustomTemplateConfig,CustomConfig } from '../types/index.js';
 import { Logger } from '../utils/logger.js';
 import { WebSocketServer, WebSocket } from 'ws';
 import { IncomingMessage as HttpIncomingMessage } from 'http';
@@ -8,7 +8,8 @@ import { ConfigManager } from '../core/config.js';
 // WebSocket 消息结构
 interface WebSocketMessage<T = Record<string, any>> {
   type: 'heartbeat' | 'connected' | 'llm' | 'error';
-  app_id?: string;
+  project_name: string;
+  provider: CustomConfig;
   data?: T;
   timestamp: number;
 }
@@ -31,6 +32,7 @@ export class CustomProvider extends BaseProvider {
   private apiKey!: string;
   private clients = new Map<string, ClientConnection>();  // app_id → connection
   private configManager: ConfigManager;
+
   private logger: Logger;
 
   // 心跳配置
@@ -128,7 +130,6 @@ export class CustomProvider extends BaseProvider {
 
     this.clients.set(app_id, connection);
     this.logger.info(`Client connected: ${app_id}`);
-
     // 发送连接确认
     this.sendToClient(app_id, {
       type: 'connected',
@@ -137,6 +138,8 @@ export class CustomProvider extends BaseProvider {
         server_version: '1.0.0'
       },
       timestamp: Date.now(),
+      project_name: this.projectName || '',
+      provider: (this.config!.provider as CustomConfig) || { name: 'custom', app_id, api_key: '' },
     });
 
     ws.on('message', (rawMessage: Buffer) => {
@@ -164,7 +167,7 @@ export class CustomProvider extends BaseProvider {
         case 'heartbeat':
           // 客户端发送 pong
           if (message.data?.action === 'pong') {
-            const client = this.clients.get(message.app_id!);
+            const client = this.clients.get(message.provider.app_id!);
             if (client) {
               client.lastHeartbeat = Date.now();
             }
@@ -179,8 +182,8 @@ export class CustomProvider extends BaseProvider {
   }
 
   private handleLLMMessage(message: WebSocketMessage): void {
-    if (!message.app_id) {
-      this.logger.warn('LLM message missing app_id');
+    if (!message.provider.app_id) {
+      this.logger.warn(`LLM message missing app_id in metadata: ${JSON.stringify(message)}`);
       return;
     }
 
@@ -188,8 +191,8 @@ export class CustomProvider extends BaseProvider {
       type: 'incoming',
       provider: 'custom',
       projectId: this.getProjectId(),
-      chatId: message.app_id,
-      userId: message.app_id,
+      chatId: message.provider.app_id || '',
+      userId: message.provider.app_id || '',
       content: message.data?.content || '',
       timestamp: message.timestamp,
       metadata: {
@@ -198,8 +201,10 @@ export class CustomProvider extends BaseProvider {
       },
     };
 
-    this.emitMessage(incomingMessage);
-    this.logger.info(`LLM message received from ${message.app_id}: ${incomingMessage.content.substring(0, 50)}...`);
+    if (this.messageCallback) {
+      this.messageCallback(incomingMessage);
+    }
+    this.logger.info(`LLM message received from ${message.provider.app_id}: ${incomingMessage.content.substring(0, 50)}...`);
   }
 
   private sendToClient(app_id: string, message: WebSocketMessage): void {
@@ -208,18 +213,7 @@ export class CustomProvider extends BaseProvider {
       client.ws.send(JSON.stringify(message));
     }
   }
-
-  private sendError(app_id: string, code: string, message: string): void {
-    this.sendToClient(app_id, {
-      type: 'error',
-      data: {
-        code,
-        message,
-      },
-      timestamp: Date.now(),
-    });
-  }
-
+  
   private handleClientDisconnect(app_id: string): void {
     this.clients.delete(app_id);
     this.logger.info(`Client disconnected: ${app_id}`);
@@ -239,8 +233,10 @@ export class CustomProvider extends BaseProvider {
         }
 
         if (connection.ws.readyState === 1) {
+          const template: CustomTemplateConfig = this.config as CustomTemplateConfig;
           connection.ws.send(JSON.stringify({
             type: 'heartbeat',
+            app_id:template?.provider?.app_id || '',
             data: { action: 'ping' },
             timestamp: now,
           }));
@@ -253,13 +249,15 @@ export class CustomProvider extends BaseProvider {
     const app_id = chatId;
     this.sendToClient(app_id, {
       type: 'llm',
+      project_name: this.projectName || '',
+      provider: (this.config!.provider as CustomConfig) || { name: 'custom', app_id, api_key: '' },
       data: {
         success: true,
         content,
         metadata: {
           duration: metadata?.duration,
           transcript_path: metadata?.transcript_path,
-        },
+        }
       },
       timestamp: Date.now(),
     });

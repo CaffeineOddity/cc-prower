@@ -71,6 +71,7 @@ export class MessageInjector {
     this.logger.info(`Injecting message to tmux pane ${tmuxPane} for project ${normalizedName}`);
 
     try {
+      this.logger.debug(`Message content: ${content.substring(0, 100)}...`);
       await this.tmuxExecutor.sendKeys(tmuxPane, prompt);
       this.logger.info(`Successfully injected message to tmux pane ${tmuxPane}`);
       return true;
