@@ -136,9 +136,11 @@ export class TmuxExecutor {
       // 4. 粘贴 buffer（-b 在 -t 前面）
       await runCommand(['paste-buffer', '-b', bufferName, '-t', targetPane]);
       this.logger.debug(`Buffer '${bufferName}' pasted to ${targetPane}`);
-      // 稍长的延迟确保粘贴完成
-      await new Promise(resolve => setTimeout(resolve, 100));
-      // 5. 发送 C-m 提交
+      // 5. 动态延迟：根据文本长度调整，每 100 字符增加 50ms，最少 100ms，最多 1000ms
+      const dynamicDelay = Math.min(100 + Math.floor(text.length / 100) * 50, 1000);
+      await new Promise(resolve => setTimeout(resolve, dynamicDelay));
+      this.logger.debug(`Waited ${dynamicDelay}ms for paste to complete`);
+      // 6. 发送 C-m 提交
       await runCommand(['send-keys', '-t', targetPane, 'C-m']);
       this.logger.debug(`C-m sent to ${targetPane}`);
     } catch (error) {

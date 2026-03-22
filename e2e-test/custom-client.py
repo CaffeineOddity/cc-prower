@@ -62,6 +62,7 @@ class ClaudeClient:
     async def _receive_messages(self) -> None:
         """接收并处理服务器消息"""
         if not self.ws:
+            print("WebSocket not connected")
             return
 
         try:
