@@ -52,11 +52,12 @@ export class ProviderRegistry {
 
     // 创建 Provider 实例
     let providerInstance: IProvider;
-    if (typeof ProviderModule === 'function') {
-      // CustomProvider 需要传入 configManager
+
+    if (providerType === 'custom') {
+      // CustomProvider 需要传入 configManager，loadProvider 返回的是工厂函数
       providerInstance = ProviderModule(this.logger) as IProvider;
     } else {
-      // 其他 Provider 使用标准构造函数
+      // 其他 Provider 使用标准构造函数（用 new）
       providerInstance = new ProviderModule(this.logger) as IProvider;
     }
 
