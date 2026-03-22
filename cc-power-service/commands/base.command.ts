@@ -60,19 +60,31 @@ export async function get_project_config_template(projectPath:string): Promise<T
     ];
 
     let projectConfig: TemplateProviderConfig | null = null;
+    let lastError: Error | null = null;
+
     for (const candidate of configPaths) {
         try {
             const content = await fs.readFile(candidate, 'utf-8');
             const yaml = await import('yaml');
             projectConfig = yaml.parse(content) as TemplateProviderConfig;
+            console.log(`[get_project_config_template] Loaded config from ${candidate}`);
             break;
         } catch (error) {
-            console.log(`Error loading config from ${candidate}: ${error}`);
+            const err = error as Error;
+            console.log(`[get_project_config_template] Error loading config from ${candidate}: ${err.message}`);
+            lastError = err;
             continue;
         }
     }
+
     if (projectConfig && projectConfig.project_name == "") {
         projectConfig.project_name = projectName;
     }
-  return projectConfig;
+
+    if (!projectConfig) {
+        console.log(`[get_project_config_template] No valid config found for project path: ${projectPath}`);
+        console.log(`[get_project_config_template] Last error: ${lastError?.message}`);
+    }
+
+    return projectConfig;
 }

@@ -150,7 +150,7 @@ export class StartCommand extends BaseCommand {
       }
 
       const signal = JSON.parse(fileContent);
-      this.logger.info(`Processing signal file: ${fileName}`);
+      this.logger.info(`Processing signal file: ${fileName}, signal type: ${signal.type}`);
 
       if (fileName.startsWith('register-')) {
         await this.handleRegisterSignal(filePath, signal);
@@ -158,7 +158,11 @@ export class StartCommand extends BaseCommand {
         await this.handleUnregisterSignal(filePath, signal);
       }
     } catch (error) {
-      this.logger.error(`Failed to process signal file ${filePath}:`, error);
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack : undefined;
+      this.logger.error(`Failed to process signal file ${filePath}: ${errorMsg}`, errorStack || '');
+      // 不要删除信号文件，让用户知道有问题
+      this.logger.info(`Signal file ${filePath} preserved due to error`);
     }
   }
 
@@ -173,22 +177,26 @@ export class StartCommand extends BaseCommand {
       this.logger.error(`No projectDirectory in register signal`);
       return;
     }
-    
-    let projectConfig = await get_project_config_template(projectDir)
+
+    let projectConfig = await get_project_config_template(projectDir);
 
     if (!projectConfig) {
-        this.logger.error(`No projectConfig in register signal`);
+        this.logger.error(`No projectConfig found in register signal for project directory: ${projectDir}`);
         return;
     }
 
-    
     signal.config = projectConfig;
 
-    // 不再需要 projectId，由 router 自动生成
-    await this.router.registerProject(signal);
-    this.logger.info(`Successfully registered project from signal: ${signal.projectName}`);
-
-    await fs.unlink(filePath).catch(() => {});
+    try {
+      // 不再需要 projectId，由 router 自动生成
+      await this.router.registerProject(signal);
+      this.logger.info(`Successfully registered project from signal: ${signal.projectName}`);
+      await fs.unlink(filePath).catch(() => {});
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack : undefined;
+      this.logger.error(`Failed to register project ${signal.projectName}: ${errorMsg}`, errorStack || '');
+    }
   }
 
   /**

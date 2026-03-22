@@ -93,9 +93,11 @@ export class Router implements IRouter {
 
     const { config, projectName, tmuxPane } = signal;
 
+    this.logger.info(`registerProject called with: project_name=${projectName}, tmuxPane=${tmuxPane}, config=${JSON.stringify(config).substring(0, 200)}...`);
+
     // 验证配置
     if (!config.provider || typeof config.provider !== 'object' || !('name' in config.provider)) {
-      throw new Error(`Invalid provider configuration`);
+      throw new Error(`Invalid provider configuration: ${JSON.stringify(config)}`);
     }
 
     const providerType = config.provider.name;
@@ -105,6 +107,8 @@ export class Router implements IRouter {
       project_name: projectName || 'unnamed',
       provider: config.provider,
     };
+
+    this.logger.info(`Calling providerRegistry.registerProject with providerType=${providerType}, tmuxPane=${tmuxPane}`);
 
     // 注册 Provider
     const { projectId } = await this.providerRegistry.registerProject(
